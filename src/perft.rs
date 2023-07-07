@@ -15,22 +15,80 @@ const RESULTS: [[usize; 6]; 5] = [
     [44, 1486, 62379, 2103487, 89941194, 3048196529],
     [46, 2079, 89890, 3894594, 164075551, 6923051137],
 ];
-fn perft(board: Board, depth: usize) -> usize {
-    let iterable = MoveGen::new_legal(&board);
-    if depth == 1 {
-        return iterable.len();
+const KEY: u64 = 131071;
+struct Entry {
+    key: u64,
+    depth: usize,
+    nodes: usize,
+}
+struct PerftTable {
+    table: Vec<Entry>,
+    depth: usize,
+}
+impl PerftTable {
+    #[inline]
+    pub fn init(depth: usize) -> PerftTable {
+        let mut x = PerftTable {
+            table: Vec::<Entry>::with_capacity(131072),
+            depth,
+        };
+        for i in 0..131072 {
+            x.table.push(Entry {
+                key: i + 1,
+                depth: 0,
+                nodes: 0,
+            });
+        }
+        return x;
     }
+    pub fn look_up(&self, key: u64, depth: usize) -> Option<&Entry> {
+        let res = self.table.get((key & KEY) as usize);
+        if res.is_some() {
+            let data = res.unwrap();
+            if data.key != key || data.depth != depth {
+                return None;
+            }
+        }
+        return res;
+    }
+    pub fn set(&mut self, key: u64, nodes: usize, depth: usize) {
+        let index = (key & KEY) as usize;
+        let prev = self.table.get(index).unwrap();
+        if prev.nodes == 0 {
+            self.table[(key & KEY) as usize] = Entry { key, nodes, depth };
+            return;
+        }
+        if nodes < 500 {
+            return;
+        }
+        let value = (self.depth - depth) * depth;
+        let prev_value = prev.depth * (self.depth - prev.depth);
+        self.table[(key & KEY) as usize] = Entry { key, nodes, depth };
+    }
+}
+fn perft(board: Board, depth: usize, tt: &mut PerftTable) -> usize {
+    if depth == 1 {
+        return MoveGen::new_legal(&board).len();
+    }
+    let key = board.get_hash();
+    let tt_res = tt.look_up(key, depth);
+    if tt_res.is_some() {
+        return tt_res.unwrap().nodes;
+    }
+    let iterable = MoveGen::new_legal(&board);
     let mut res: usize = 0;
     for m in iterable {
-        res += perft(board.make_move_new(m), depth - 1);
+        res += perft(board.make_move_new(m), depth - 1, tt);
     }
+    tt.set(key, res, depth);
     return res;
 }
 pub fn go_perft(board: &Board, depth: usize) -> usize {
     if depth == 0 {
-        println!("0");
+        println!("0 in 1.0ms");
         return 0;
     }
+    let mut tt = PerftTable::init(depth);
     let iterable = MoveGen::new_legal(board);
     let mut res: usize = 0;
     for m in iterable {
@@ -38,7 +96,7 @@ pub fn go_perft(board: &Board, depth: usize) -> usize {
             println!("{}: {}", m.to_string(), 1);
             res += 1;
         } else {
-            let n = perft(board.make_move_new(m), depth - 1);
+            let n = perft(board.make_move_new(m), depth - 1, &mut tt);
             res += n;
             println!("{}: {}", m.to_string(), n);
         }
@@ -50,6 +108,11 @@ pub fn default_perft(pos: usize, depth: usize) -> usize {
     let start = Instant::now();
     let res = go_perft(&board, depth);
     let duration = start.elapsed();
-    println!("{} in {:?}", res, duration);
+    println!(
+        "{} in {:?}, match: {}",
+        res,
+        duration,
+        res == RESULTS[pos][depth - 1]
+    );
     return res;
 }

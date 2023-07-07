@@ -1,3 +1,5 @@
+use chess::ChessMove;
+
 const PIECE_CHARS: [char; 12] = ['p', 'P', 'n', 'N', 'b', 'B', 'r', 'R', 'q', 'Q', 'k', 'K'];
 const FILES: [char; 8] = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 pub struct Board {
@@ -132,4 +134,10 @@ pub fn print_bitboard(bb: u64) {
             }
         }
     }
+}
+pub fn print_move_list(moves: &Vec<ChessMove>) {
+    for m in moves {
+        print!("{}, ", m.to_string());
+    }
+    println!();
 }
