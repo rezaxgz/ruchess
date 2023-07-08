@@ -1,6 +1,6 @@
 use chess::{Board, MoveGen};
 use std::str::FromStr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 const POSITIONS: [&str; 5] = [
     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
     "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
@@ -63,7 +63,9 @@ impl PerftTable {
         }
         let value = (self.depth - depth) * depth;
         let prev_value = prev.depth * (self.depth - prev.depth);
-        self.table[(key & KEY) as usize] = Entry { key, nodes, depth };
+        if value >= prev_value {
+            self.table[(key & KEY) as usize] = Entry { key, nodes, depth };
+        }
     }
 }
 fn perft(board: Board, depth: usize, tt: &mut PerftTable) -> usize {
@@ -103,6 +105,7 @@ pub fn go_perft(board: &Board, depth: usize) -> usize {
     }
     return res;
 }
+#[allow(dead_code)]
 pub fn default_perft(pos: usize, depth: usize) -> usize {
     let board = Board::from_str(POSITIONS[pos]).unwrap();
     let start = Instant::now();

@@ -3,11 +3,8 @@ use crate::{
     moves::{sort_captures, sort_moves},
     transposition_table::{EntryType, TranspositionTable},
 };
-use chess::{BitBoard, Board, BoardStatus, ChessMove, Color, MoveGen, Piece};
-use std::{
-    time::{Duration, Instant},
-    vec,
-};
+use chess::{Board, BoardStatus, ChessMove, MoveGen};
+use std::time::{Duration, Instant};
 const SEARCH_EXIT_KEY: i16 = std::i16::MAX;
 const ALPHA: i16 = -i16::MAX;
 const BETA: i16 = i16::MAX;
@@ -21,13 +18,7 @@ pub struct SearchResult {
     pub duration: Duration,
 }
 
-fn quiesce(
-    board: &Board,
-    alpha: i16,
-    beta: i16,
-    ply_from_root: u8,
-    tt: &mut TranspositionTable,
-) -> i16 {
+fn quiesce(board: &Board, alpha: i16, beta: i16, ply_from_root: u8) -> i16 {
     let status = board.status();
     if status == BoardStatus::Checkmate {
         return -10000 + (ply_from_root as i16);
@@ -35,7 +26,7 @@ fn quiesce(
         return 0;
     }
     let mut alpha = alpha;
-    let stand_pat = evaluate(board, tt);
+    let stand_pat = evaluate(board);
     if stand_pat >= beta {
         return beta;
     }
@@ -47,13 +38,7 @@ fn quiesce(
     iterable.set_iterator_mask(*targets);
     let moves = sort_captures(&mut iterable, board);
     for mv in moves {
-        let score = -quiesce(
-            &board.make_move_new(mv),
-            -beta,
-            -alpha,
-            ply_from_root + 1,
-            tt,
-        );
+        let score = -quiesce(&board.make_move_new(mv), -beta, -alpha, ply_from_root + 1);
         if score >= beta {
             return beta;
         }
@@ -81,7 +66,7 @@ fn alpha_beta(
             return tt_value.unwrap().eval;
         }
         if ply_from_root == CURRENT_SEARCH_DEPTH {
-            return quiesce(board, alpha, beta, ply_from_root + 1, tt);
+            return quiesce(board, alpha, beta, ply_from_root + 1);
         }
         if init.elapsed() >= TIME_LIMIT {
             return SEARCH_EXIT_KEY;

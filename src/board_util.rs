@@ -122,6 +122,7 @@ pub fn print_board(board: Board) {
         board.turn, board.xturn, board.ep, board.castle, board.fullmoves, board.halfmoves
     );
 }
+#[allow(dead_code)]
 pub fn print_bitboard(bb: u64) {
     for row in (0..8).rev() {
         println!("");
@@ -135,6 +136,7 @@ pub fn print_bitboard(bb: u64) {
         }
     }
 }
+#[allow(dead_code)]
 pub fn print_move_list(moves: &Vec<ChessMove>) {
     for m in moves {
         print!("{}, ", m.to_string());

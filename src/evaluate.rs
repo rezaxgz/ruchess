@@ -1,25 +1,17 @@
-use std::collections::btree_map::Entry;
-
-use crate::{
-    data::{
-        get_distance_from_center, get_orthogonal_distance, get_sq_distance, FILES, FRONT_SPANS,
-        KING_SQUARE_TABLES, PIECE_SQUARE_TABLES,
-    },
-    transposition_table::TranspositionTable,
-};
-use chess::{BitBoard, Board, Color, Piece, Rank, Square};
+use crate::data::{get_distance_from_center, get_orthogonal_distance, get_pst_value};
+use chess::{Board, Color, Piece, Square};
 
 const ENDGAME_MATERIAL_START: u32 = 500 * 2 + 320 + 300;
 const MULTIPLIER: f32 = 1.0 / ENDGAME_MATERIAL_START as f32;
-const FLANKS: [u64; 3] = [
-    FILES[0] | FILES[1] | FILES[2],
-    FILES[3] | FILES[4],
-    FILES[5] | FILES[6] | FILES[7],
-];
-const NOT_RANK_2: u64 = !0xFF00;
-const NOT_RANK_7: u64 = !0xFF000000000000;
-const RANK_2: u64 = 0xFF00;
-const RANK_7: u64 = 0xFF000000000000;
+// const FLANKS: [u64; 3] = [
+//     FILES[0] | FILES[1] | FILES[2],
+//     FILES[3] | FILES[4],
+//     FILES[5] | FILES[6] | FILES[7],
+// ];
+// const NOT_RANK_2: u64 = !0xFF00;
+// const NOT_RANK_7: u64 = !0xFF000000000000;
+// const RANK_2: u64 = 0xFF00;
+// const RANK_7: u64 = 0xFF000000000000;
 fn get_endgame_weight(material: u32) -> f32 {
     if material < ENDGAME_MATERIAL_START {
         return 1.0 - (material as f32 * MULTIPLIER);
@@ -27,7 +19,7 @@ fn get_endgame_weight(material: u32) -> f32 {
         return 0.0;
     };
 }
-pub fn evaluate(board: &Board, tt: &mut TranspositionTable) -> i16 {
+pub fn evaluate(board: &Board) -> i16 {
     let mut white_eval: u32 = 0;
     let mut black_eval: u32 = 0;
 
@@ -47,6 +39,8 @@ pub fn evaluate(board: &Board, tt: &mut TranspositionTable) -> i16 {
     let white_endgame = get_endgame_weight(white_material_without_pawns);
     let black_endgame = get_endgame_weight(black_material_without_pawns);
 
+    let white_middlegame = 1.0 - white_endgame;
+    let black_middlegame = 1.0 - black_endgame;
     let mut piece_scores = 0;
     for i in 0..64 {
         unsafe {
@@ -54,23 +48,13 @@ pub fn evaluate(board: &Board, tt: &mut TranspositionTable) -> i16 {
             let p = board.piece_on(sq);
             if p.is_some() {
                 let piece = p.unwrap();
-                if piece != Piece::King {
-                    piece_scores += PIECE_SQUARE_TABLES[board.color_on(sq).unwrap().to_index()]
-                        [p.unwrap().to_index()][i as usize];
+                let color = board.color_on(sq).unwrap().to_index();
+                if color == 0 {
+                    piece_scores +=
+                        get_pst_value(color, piece, i as usize, black_endgame, black_middlegame);
                 } else {
-                    if board.color_on(sq).unwrap() == Color::White {
-                        if black_endgame > 0.0 {
-                            piece_scores += KING_SQUARE_TABLES[0][i as usize];
-                        } else {
-                            piece_scores += PIECE_SQUARE_TABLES[0][5][i as usize];
-                        }
-                    } else {
-                        if white_endgame > 0.0 {
-                            piece_scores += KING_SQUARE_TABLES[1][i as usize];
-                        } else {
-                            piece_scores += PIECE_SQUARE_TABLES[1][5][i as usize];
-                        }
-                    }
+                    piece_scores +=
+                        get_pst_value(color, piece, i as usize, white_endgame, white_middlegame);
                 }
             }
         }

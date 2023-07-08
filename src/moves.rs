@@ -1,6 +1,6 @@
 const NOT_FILE_A_BB: u64 = !72340172838076673;
 const NOT_FILE_H_BB: u64 = !(72340172838076673 << 7);
-use chess::{BitBoard, Board, BoardStatus, ChessMove, Color, MoveGen, Piece, Square};
+use chess::{Board, ChessMove, Color, MoveGen, Piece};
 
 use crate::data::get_spst_value;
 fn piece_value(piece: Piece) -> i8 {
@@ -30,9 +30,8 @@ fn move_value(
     is_controled: bool,
     color: Color,
 ) -> i8 {
-    // let mut value: i8 = get_spst_value(color, piece_at_start, m.get_source())
-    //     - get_spst_value(color, piece_at_start, m.get_dest());
-    let mut value: i8 = 0;
+    let mut value: i8 = get_spst_value(color, piece_at_start, m.get_dest())
+        - get_spst_value(color, piece_at_start, m.get_source());
     if piece_at_end.is_some() {
         let capture_value = (piece_value(piece_at_end.unwrap()) - piece_value(piece_at_start)) << 3;
         value += capture_value;
