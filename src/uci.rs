@@ -88,7 +88,7 @@ pub fn uci() {
                         let res = start_search(
                             &board,
                             7,
-                            Duration::new((time / 1000) as u64, (time % 1000) * 1000),
+                            Duration::new((time / 1000) as u64, (time % 1000) * 1000000),
                             &mut tt,
                         );
                         println!("bestmove {}", res.best_move.to_string());

@@ -103,6 +103,7 @@ pub const PAWN_SQUARE_TABLES: [[i16; 64]; 2] = [
 ];
 pub static mut SORT_PIECE_SQ_TABLE: [[[i8; 64]; 6]; 2] = [[[0; 64]; 6]; 2];
 pub static mut FRONT_SPANS: [[u64; 64]; 2] = [[0; 64]; 2];
+pub static mut ADJACENT_FILES: [u64; 8] = [0; 8];
 pub const RANKS: [u64; 8] = [
     0xFF,
     0xFF00,
@@ -189,28 +190,32 @@ pub fn init() {
             PIECE_SQUARE_TABLES.map(|clr| clr.map(|piece| piece.map(|sq| (sq / 5) as i8)));
     }
     for file in 0..8 {
+        let mut files = 0;
+        if file > 0 {
+            files |= FILES[file - 1];
+        }
+        if file < 7 {
+            files |= FILES[file + 1];
+        }
+        unsafe {
+            ADJACENT_FILES[file] = files;
+        }
+        files |= FILES[file];
         for rank in 0..8 {
             let i = rank * 8 + file;
             let mut front_ranks: u64 = 0;
-            for r in rank + 1..8 {
-                front_ranks |= RANKS[r];
-            }
-            let mut files = FILES[file];
-            if file > 0 {
-                files |= FILES[file - 1];
-            }
-            if file < 7 {
-                files |= FILES[file + 1];
-            }
-            unsafe {
-                FRONT_SPANS[1][i] = front_ranks & files;
-            }
-            front_ranks = 0;
-            for r in 0..rank {
+            for r in rank + 1..7 {
                 front_ranks |= RANKS[r];
             }
             unsafe {
                 FRONT_SPANS[0][i] = front_ranks & files;
+            }
+            front_ranks = 0;
+            for r in 1..rank {
+                front_ranks |= RANKS[r];
+            }
+            unsafe {
+                FRONT_SPANS[1][i] = front_ranks & files;
             }
         }
     }

@@ -135,6 +135,7 @@ pub fn print_bitboard(bb: u64) {
             }
         }
     }
+    println!();
 }
 #[allow(dead_code)]
 pub fn print_move_list(moves: &Vec<ChessMove>) {
