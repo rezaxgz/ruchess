@@ -1,5 +1,6 @@
 use crate::data::{
-    get_distance_from_center, get_orthogonal_distance, get_pst_value, ADJACENT_FILES, FRONT_SPANS,
+    get_distance_from_center, get_orthogonal_distance, get_pst_value, ADJACENT_FILES, FILESETS,
+    FRONT_SPANS,
 };
 use chess::{Board, Color, Piece, Square};
 
@@ -7,6 +8,7 @@ const ENDGAME_MATERIAL_START: f32 = (500 * 2 + 320 + 300) as f32;
 const MULTIPLIER: f32 = 1.0 / ENDGAME_MATERIAL_START as f32;
 const PASSED_PAWN_VALUES: [i16; 7] = [0, 90, 60, 40, 25, 15, 15];
 const ISOLATED_PAWN_PENALTY: [i16; 9] = [0, -10, -25, -50, -80, -85, -90, -95, -100];
+// const UNHEALTHY_PAWN_PENALTY: [i16; 8] = [0, -10, -25, -40, -60, -80, -90, -100];
 // const FLANKS: [u64; 3] = [
 //     FILES[0] | FILES[1] | FILES[2],
 //     FILES[3] | FILES[4],
@@ -29,12 +31,13 @@ pub fn evaluate(board: &Board) -> i16 {
 
     let wp = board.pieces(Piece::Pawn) & board.color_combined(Color::White);
     let bp = board.pieces(Piece::Pawn) & board.color_combined(Color::Black);
+    let wr = board.pieces(Piece::Rook) & board.color_combined(Color::White);
+    let br = board.pieces(Piece::Rook) & board.color_combined(Color::Black);
     white_material +=
         (board.pieces(Piece::Knight) & board.color_combined(Color::White)).popcnt() * 300;
     white_material +=
         (board.pieces(Piece::Bishop) & board.color_combined(Color::White)).popcnt() * 320;
-    white_material +=
-        (board.pieces(Piece::Rook) & board.color_combined(Color::White)).popcnt() * 500;
+    white_material += wr.popcnt() * 500;
     white_material +=
         (board.pieces(Piece::Queen) & board.color_combined(Color::White)).popcnt() * 900;
     let white_material_without_pawns = white_material as f32;
@@ -43,8 +46,7 @@ pub fn evaluate(board: &Board) -> i16 {
         (board.pieces(Piece::Knight) & board.color_combined(Color::Black)).popcnt() * 300;
     black_material +=
         (board.pieces(Piece::Bishop) & board.color_combined(Color::Black)).popcnt() * 320;
-    black_material +=
-        (board.pieces(Piece::Rook) & board.color_combined(Color::Black)).popcnt() * 500;
+    black_material += br.popcnt() * 500;
     black_material +=
         (board.pieces(Piece::Queen) & board.color_combined(Color::Black)).popcnt() * 900;
     let black_material_without_pawns = black_material as f32;
@@ -88,8 +90,19 @@ pub fn evaluate(board: &Board) -> i16 {
         white_material_without_pawns,
         white_endgame,
     );
-    let pawn_eval = evaluate_pawns(wp.0, bp.0, 0) - evaluate_pawns(bp.0, wp.0, 1);
-    let eval = white_material as i16 - black_material as i16 + mop_eval + piece_scores + pawn_eval;
+    let wpawns = evaluate_pawns(wp.0, bp.0, 0);
+    let bpawns = evaluate_pawns(bp.0, wp.0, 1);
+    let pawn_eval = wpawns.0 - bpawns.0;
+    // let closed = wpawns.1 & bpawns.1;
+    let open = (!wpawns.1) & (!bpawns.1);
+    let semi_open_white = bpawns.1 & (!wpawns.1);
+    let semi_open_black = wpawns.1 & (bpawns.1);
+    let rooks_eval = evaluate_rooks(wr.0, br.0, open, semi_open_white, semi_open_black);
+    let eval = white_material as i16 - black_material as i16
+        + mop_eval
+        + piece_scores
+        + pawn_eval
+        + rooks_eval;
     if board.side_to_move() == Color::White {
         return eval;
     }
@@ -109,13 +122,20 @@ fn mop_up_eval(
     }
     return score;
 }
-fn evaluate_pawns(pawns: u64, enemy_pawns: u64, color: usize) -> i16 {
+fn evaluate_pawns(pawns: u64, enemy_pawns: u64, color: usize) -> (i16, u8) {
     let mut score = 0;
     let mut p = pawns;
     let mut isolated_pawn_count = 0;
+    // let mut unhealty_pawn_count = 0;
+    let mut fileset: u8 = 0;
     while p != 0 {
         let i = p.trailing_zeros();
         let file = i & 7;
+        // if ((fileset >> file) & 1) == 1 {
+        //     unhealty_pawn_count += 1;
+        // } else {
+        fileset |= 1 << file;
+        // }
         unsafe {
             if FRONT_SPANS[color][i as usize] & enemy_pawns == 0 {
                 let rank = (i >> 3) as usize;
@@ -129,5 +149,16 @@ fn evaluate_pawns(pawns: u64, enemy_pawns: u64, color: usize) -> i16 {
         p &= p - 1;
     }
     score += ISOLATED_PAWN_PENALTY[isolated_pawn_count];
+    // score -= 15 * unhealty_pawn_count;
+    return (score, fileset);
+}
+fn evaluate_rooks(wr: u64, br: u64, open: u8, semi_open_white: u8, semi_open_black: u8) -> i16 {
+    let mut score = 0;
+    unsafe {
+        score += (FILESETS[open as usize] & wr).count_ones() as i16 * 30;
+        score += (FILESETS[semi_open_white as usize] & wr).count_ones() as i16 * 20;
+        score -= (FILESETS[open as usize] & br).count_ones() as i16 * 30;
+        score -= (FILESETS[semi_open_black as usize] & br).count_ones() as i16 * 20;
+    }
     return score;
 }

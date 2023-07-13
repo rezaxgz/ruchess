@@ -3,7 +3,7 @@ use crate::{
     moves::{sort_captures, sort_moves},
     transposition_table::{EntryType, TranspositionTable},
 };
-use chess::{Board, BoardStatus, ChessMove, MoveGen};
+use chess::{Board, BoardStatus, ChessMove, MoveGen, Piece, Rank};
 use std::time::{Duration, Instant};
 const SEARCH_EXIT_KEY: i16 = std::i16::MAX;
 const ALPHA: i16 = -i16::MAX;
@@ -51,6 +51,8 @@ fn quiesce(board: &Board, alpha: i16, beta: i16, ply_from_root: u8) -> i16 {
 fn alpha_beta(
     board: &Board,
     ply_from_root: u8,
+    depth: u8,
+    extended: u8,
     alpha: i16,
     beta: i16,
     init: &Instant,
@@ -58,16 +60,13 @@ fn alpha_beta(
 ) -> i16 {
     let key = board.get_hash();
     let tt_value = tt.look_up_pos(key);
+    if tt_value.is_some() && ply_from_root < 3 && (depth <= tt_value.unwrap().depth) {
+        return tt_value.unwrap().eval;
+    }
+    if depth == 0 {
+        return quiesce(board, alpha, beta, ply_from_root + 1);
+    }
     unsafe {
-        if tt_value.is_some()
-            && ply_from_root < 3
-            && ((CURRENT_SEARCH_DEPTH - ply_from_root) <= tt_value.unwrap().depth)
-        {
-            return tt_value.unwrap().eval;
-        }
-        if ply_from_root == CURRENT_SEARCH_DEPTH {
-            return quiesce(board, alpha, beta, ply_from_root + 1);
-        }
         if init.elapsed() >= TIME_LIMIT {
             return SEARCH_EXIT_KEY;
         }
@@ -84,36 +83,37 @@ fn alpha_beta(
     let mut alpha = alpha;
     let mut tt_type = EntryType::UpperBound;
     // let mut best_move = ChessMove::default();
-    for mv in moves {
-        let new_board = board.make_move_new(mv);
-        let score = -alpha_beta(&new_board, ply_from_root + 1, -beta, -alpha, init, tt);
+    for i in 0..moves.len() {
+        let mv = moves.get(i).unwrap();
+        let piece = board.piece_on(mv.get_source()).unwrap();
+        let new_board = board.make_move_new(*mv);
+        let is_check = board.checkers().0 != 0;
+        let mut extention = if is_check && extended < 6 { 1 } else { 0 };
+        let rank = mv.get_dest().get_rank();
+        if piece == Piece::Pawn && (rank == Rank::Second || rank == Rank::Seventh) {
+            extention += 1;
+        }
+        let score = -alpha_beta(
+            &new_board,
+            ply_from_root + 1,
+            depth + extention - 1,
+            extended + extention,
+            -beta,
+            -alpha,
+            init,
+            tt,
+        );
         if score >= beta {
-            unsafe {
-                tt.set_pos(
-                    key,
-                    beta,
-                    EntryType::UpperBound,
-                    CURRENT_SEARCH_DEPTH - ply_from_root,
-                    mv,
-                );
-            }
+            tt.set_pos(key, beta, EntryType::UpperBound, depth, *mv);
             return beta;
         }
         if score > alpha {
             alpha = score;
             tt_type = EntryType::Exact;
-            best_move = mv;
+            best_move = *mv;
         }
     }
-    unsafe {
-        tt.set_pos(
-            key,
-            alpha,
-            tt_type,
-            CURRENT_SEARCH_DEPTH - ply_from_root,
-            best_move,
-        );
-    }
+    tt.set_pos(key, alpha, tt_type, depth, best_move);
     return alpha;
 }
 fn search(
@@ -133,7 +133,7 @@ fn search(
     for i in 0..moves.len() {
         let mv = *moves.get(i).unwrap();
         let new_board = board.make_move_new(mv);
-        let score = -alpha_beta(&new_board, 1, -BETA, -alpha, init, tt);
+        let score = -alpha_beta(&new_board, 1, max_depth - 1, 0, -BETA, -alpha, init, tt);
         ext_moves.push((mv, score));
         if score > alpha {
             alpha = score;

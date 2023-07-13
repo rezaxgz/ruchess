@@ -104,6 +104,7 @@ pub const PAWN_SQUARE_TABLES: [[i16; 64]; 2] = [
 pub static mut SORT_PIECE_SQ_TABLE: [[[i8; 64]; 6]; 2] = [[[0; 64]; 6]; 2];
 pub static mut FRONT_SPANS: [[u64; 64]; 2] = [[0; 64]; 2];
 pub static mut ADJACENT_FILES: [u64; 8] = [0; 8];
+pub static mut FILESETS: [u64; 256] = [0; 256];
 pub const RANKS: [u64; 8] = [
     0xFF,
     0xFF00,
@@ -216,6 +217,15 @@ pub fn init() {
             }
             unsafe {
                 FRONT_SPANS[1][i] = front_ranks & files;
+            }
+        }
+    }
+    for i in 0..256 {
+        for j in 0..8 {
+            if (i >> j) & 1 == 1 {
+                unsafe {
+                    FILESETS[i] |= FILES[j];
+                }
             }
         }
     }
