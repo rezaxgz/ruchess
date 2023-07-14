@@ -9,12 +9,15 @@ A rust chess engine, UCI compliant.
 -   Move Ordering
 -   MVV-LVA
 -   Quiescence Search
+-   Search Extension
 
 ## Evaluation
 
 -   Material
 -   Piece Square table
 -   Mop Up Evaluation
+-   Rook Evaluation
+-   Pawn Structure
 
 ## Move Generation
 

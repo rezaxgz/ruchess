@@ -9,7 +9,6 @@ const SEARCH_EXIT_KEY: i16 = std::i16::MAX;
 const ALPHA: i16 = -i16::MAX;
 const BETA: i16 = i16::MAX;
 
-static mut CURRENT_SEARCH_DEPTH: u8 = 0;
 static mut TIME_LIMIT: Duration = Duration::new(0, 0);
 pub struct SearchResult {
     pub eval: i16,
@@ -123,9 +122,6 @@ fn search(
     init: &Instant,
     tt: &mut TranspositionTable,
 ) -> SearchResult {
-    unsafe {
-        CURRENT_SEARCH_DEPTH = max_depth;
-    }
     let start = Instant::now();
     let mut best_move = *moves.get(0).unwrap();
     let mut alpha = ALPHA;
