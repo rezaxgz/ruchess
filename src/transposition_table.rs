@@ -89,9 +89,16 @@ impl TranspositionTable {
             best_move,
         }
     }
-    #[allow(dead_code)]
     pub fn clear(&mut self) {
-        self.table.clear();
+        for i in 0..NUM_OF_POSITIONS {
+            self.table[i] = PositionEntry {
+                key: i as u64 + 1,
+                eval: 0,
+                entry_type: EntryType::Exact,
+                depth: 0,
+                best_move: ChessMove::default(),
+            };
+        }
         // self.pawns.clear();
     }
 

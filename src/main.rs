@@ -1,6 +1,6 @@
 mod benchmark;
 mod board_util;
-// mod book;
+mod book;
 mod data;
 mod evaluate;
 mod moves;

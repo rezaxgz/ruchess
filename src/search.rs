@@ -6,6 +6,7 @@ use crate::{
 use chess::{Board, BoardStatus, ChessMove, MoveGen, Piece, Rank};
 use std::time::{Duration, Instant};
 const SEARCH_EXIT_KEY: i16 = std::i16::MAX;
+const NEG_SEARCH_EXIT_KEY: i16 = -SEARCH_EXIT_KEY;
 const ALPHA: i16 = -i16::MAX;
 const BETA: i16 = i16::MAX;
 
@@ -83,9 +84,9 @@ fn alpha_beta(
     let mut tt_type = EntryType::UpperBound;
     // let mut best_move = ChessMove::default();
     for i in 0..moves.len() {
-        let mv = moves.get(i).unwrap();
+        let mv = moves[i];
         let piece = board.piece_on(mv.get_source()).unwrap();
-        let new_board = board.make_move_new(*mv);
+        let new_board = board.make_move_new(mv);
         let is_check = board.checkers().0 != 0;
         let mut extention = if is_check && extended < 6 { 1 } else { 0 };
         let rank = mv.get_dest().get_rank();
@@ -102,14 +103,17 @@ fn alpha_beta(
             init,
             tt,
         );
+        if score == NEG_SEARCH_EXIT_KEY {
+            return SEARCH_EXIT_KEY;
+        }
         if score >= beta {
-            tt.set_pos(key, beta, EntryType::UpperBound, depth, *mv);
+            tt.set_pos(key, beta, EntryType::UpperBound, depth, mv);
             return beta;
         }
         if score > alpha {
             alpha = score;
             tt_type = EntryType::Exact;
-            best_move = *mv;
+            best_move = mv;
         }
     }
     tt.set_pos(key, alpha, tt_type, depth, best_move);
@@ -127,9 +131,17 @@ fn search(
     let mut alpha = ALPHA;
     let mut ext_moves = Vec::<(ChessMove, i16)>::with_capacity(moves.len());
     for i in 0..moves.len() {
-        let mv = *moves.get(i).unwrap();
+        let mv = moves[i];
         let new_board = board.make_move_new(mv);
         let score = -alpha_beta(&new_board, 1, max_depth - 1, 0, -BETA, -alpha, init, tt);
+        if score == (NEG_SEARCH_EXIT_KEY) {
+            return SearchResult {
+                eval: SEARCH_EXIT_KEY,
+                best_move,
+                depth: max_depth,
+                duration: start.elapsed(),
+            };
+        }
         ext_moves.push((mv, score));
         if score > alpha {
             alpha = score;
@@ -161,9 +173,12 @@ pub fn start_search(
     let mut iterable = MoveGen::new_legal(&board);
     let mut moves = sort_moves(&mut iterable, board);
     let mut result = search(board, &mut moves, 1, &start, tt);
+    if moves.len() == 1 {
+        return result;
+    }
     for i in 2..=max_depth {
         let res = search(board, &mut moves, i, &start, tt);
-        if res.eval != SEARCH_EXIT_KEY && res.eval != -SEARCH_EXIT_KEY {
+        if res.eval != SEARCH_EXIT_KEY {
             result = res;
         } else {
             break;

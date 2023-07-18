@@ -1,33 +1,34 @@
 use crate::{
     board_util::{init_board, print_board},
+    book::init_book_full,
     perft::go_perft,
     search::{search_at_fixed_depth, start_search},
     transposition_table::TranspositionTable,
 };
-use chess::{Board, ChessMove};
+use chess::{Board, ChessMove, Color};
 use std::time::Instant;
 use std::{str::FromStr, time::Duration};
 const AUTHOR: &str = "Reza";
 const ENGINENAME: &str = "ruchess";
-// fn count_moves(game: &String) -> u8 {
-//     let mut count: u8 = 0;
-//     for i in game.as_bytes() {
-//         if *i == (' ' as u8) {
-//             count += 1;
-//         }
-//     }
-//     return count;
-// }
+fn allocate_time(my_time: u32) -> Duration {
+    let time = (my_time / 30).min(15000);
+    let dur = Duration::new(time as u64 / 1000, (time % 1000) * 1000000);
+    return dur;
+}
 pub fn uci() {
     let mut prev_cmd = String::new();
     let scanner = std::io::stdin();
     let mut line = String::new();
     let mut board = Board::default();
     let mut tt = TranspositionTable::init();
+    let mut book = init_book_full();
+    let mut use_book = true;
+    let mut book_move = String::from("");
     loop {
         line.clear();
         scanner.read_line(&mut line).unwrap();
         let string = line.trim();
+        let args: Vec<&str> = string.split(" ").collect();
         match string {
             "uci" => {
                 println!("id name {}", ENGINENAME);
@@ -35,20 +36,35 @@ pub fn uci() {
                 println!("uciok");
             }
             "isready" => println!("readyok"),
-            "ucinewgame" => board = Board::default(),
+            "ucinewgame" => {
+                board = Board::default();
+                tt.clear();
+                book.reset();
+            }
             "quit" => std::process::exit(0),
             "print" => print_board(init_board(board.to_string())),
+
             a if a.starts_with("position") => {
                 if prev_cmd.contains("moves")
                     && prev_cmd.len() > 0
-                    && string.trim().starts_with(&prev_cmd.trim())
+                    && string.starts_with(&prev_cmd.trim())
                 {
                     let move_list = string[(prev_cmd.trim().len())..string.len()].trim();
+                    let i: usize = string.find("moves").unwrap();
+                    let all_move_list = string[(i + 5)..string.len()].trim();
+                    let book_res = book.check(all_move_list);
+                    match book_res {
+                        Some(x) => {
+                            book_move = x;
+                        }
+                        None => use_book = false,
+                    }
                     for m in move_list.split(" ") {
                         board = board.make_move_new(ChessMove::from_str(m).unwrap());
                     }
                 } else {
                     if string.starts_with("position fen") {
+                        use_book = false;
                         let fen = string[13..string.len()].to_owned();
                         board = Board::from_str(&fen).expect("Valid FEN");
                     }
@@ -61,18 +77,31 @@ pub fn uci() {
                         for m in move_list.split(" ") {
                             board = board.make_move_new(ChessMove::from_str(m).unwrap());
                         }
+                        let book_res = book.check(move_list);
+                        match book_res {
+                            Some(x) => {
+                                book_move = x;
+                            }
+                            None => use_book = false,
+                        }
+                    }
+                    if string == "position startpos" {
+                        let book_res = book.check("");
+                        match book_res {
+                            Some(x) => {
+                                book_move = x;
+                            }
+                            None => use_book = false,
+                        }
                     }
                 }
 
-                prev_cmd = line.clone();
+                prev_cmd = String::from(string);
             }
             a if a.starts_with("go") => {
-                // if !moves_played.starts_with(tt.get_moves().as_str()) {
-                //     tt = TranspositionTable::init();
-                // }
                 if a.contains("perft") {
-                    let i: usize = string.find("perft").unwrap();
-                    let depth = string[(i + 5)..string.len()].trim().parse::<usize>();
+                    let i = args.iter().position(|r| *r == "perft").unwrap() + 1;
+                    let depth = args[i].parse::<usize>();
                     if depth.is_ok() {
                         let start = Instant::now();
                         let res = go_perft(&board, depth.unwrap());
@@ -82,39 +111,33 @@ pub fn uci() {
                         println!("invalid depth")
                     }
                 } else {
-                    if a.contains("movetime") {
-                        let i: usize = string.find("movetime ").unwrap();
-                        let time = string[(i + 9)..string.len()].trim().parse::<u32>().unwrap();
-                        let res = start_search(
-                            &board,
-                            7,
-                            Duration::new((time / 1000) as u64, (time % 1000) * 1000000),
-                            &mut tt,
-                        );
-                        println!("bestmove {}", res.best_move.to_string());
-                    } else {
-                        let res = start_search(&board, 7, Duration::new(5, 0), &mut tt);
-                        println!("bestmove {}", res.best_move.to_string());
+                    if use_book && book_move != "".to_string() {
+                        println!("bestmove {}", book_move);
+                        book_move = String::from("");
+                        continue;
                     }
-                    // if use_book
-                    //     && !moves_played
-                    //         .clone()
-                    //         .starts_with(book.get_opening().as_str())
-                    //     || count_moves(&moves_played) > 19
-                    // {
-                    //     use_book = false;
-                    //     let res = start_search(&board, 7, Duration::new(7, 0), &mut tt);
-                    //     println!("bestmove {}", res.best_move.to_string());
-                    // } else if use_book {
-                    //     let book_move = book.get_next_move(&moves_played);
-                    //     if book_move != "" {
-                    //         println!("bestmove {}", book.get_next_move(&moves_played));
-                    //     } else {
-                    //         let res = start_search(&board, 7, Duration::new(7, 0), &mut tt);
-                    //         println!("bestmove {}", res.best_move.to_string());
-                    //     }
-                    // } else {
-                    // }
+                    let allocated_time: Duration;
+                    if a.contains("movetime") {
+                        let i = args.iter().position(|r| *r == "movetime").unwrap() + 1;
+                        let time = args[i].parse::<u32>().unwrap();
+                        allocated_time = Duration::new(time as u64 / 1000, (time % 1000) * 1000000);
+                    } else if a.contains("wtime") && a.contains("btime") {
+                        let wtime = args[args.iter().position(|r| *r == "wtime").unwrap() + 1]
+                            .parse::<u32>()
+                            .unwrap();
+                        let btime = args[args.iter().position(|r| *r == "btime").unwrap() + 1]
+                            .parse::<u32>()
+                            .unwrap();
+                        if board.side_to_move() == Color::White {
+                            allocated_time = allocate_time(wtime);
+                        } else {
+                            allocated_time = allocate_time(btime);
+                        }
+                    } else {
+                        allocated_time = Duration::new(3, 0);
+                    }
+                    let res = start_search(&board, 20, allocated_time, &mut tt);
+                    println!("bestmove {}", res.best_move.to_string());
                 }
             }
             a if a.starts_with("search") => {
