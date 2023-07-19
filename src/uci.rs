@@ -1,5 +1,5 @@
 use crate::{
-    board_util::{init_board, print_board},
+    board_util::print_board,
     book::init_book_full,
     perft::go_perft,
     search::{search_at_fixed_depth, start_search},
@@ -15,6 +15,22 @@ fn allocate_time(my_time: u32) -> Duration {
     let dur = Duration::new(time as u64 / 1000, (time % 1000) * 1000000);
     return dur;
 }
+fn add_repetition(table: &mut Vec<(u64, u8)>, hash: u64) {
+    for i in 0..table.len() {
+        if table[i].0 == hash {
+            table[i] = (hash, table[i].1 + 1);
+            return;
+        }
+    }
+    table.push((hash, 1));
+}
+fn get_possible_drawns(table: &Vec<(u64, u8)>) -> Vec<u64> {
+    return table
+        .into_iter()
+        .filter(|a| a.1 == 2)
+        .map(|i| i.0)
+        .collect();
+}
 pub fn uci() {
     let mut prev_cmd = String::new();
     let scanner = std::io::stdin();
@@ -22,6 +38,7 @@ pub fn uci() {
     let mut board = Board::default();
     let mut tt = TranspositionTable::init();
     let mut book = init_book_full();
+    let mut repetition_table: Vec<(u64, u8)> = Vec::new();
     let mut use_book = true;
     let mut book_move = String::from("");
     loop {
@@ -40,9 +57,10 @@ pub fn uci() {
                 board = Board::default();
                 tt.clear();
                 book.reset();
+                repetition_table.clear();
             }
             "quit" => std::process::exit(0),
-            "print" => print_board(init_board(board.to_string())),
+            "print" => print_board(&board),
 
             a if a.starts_with("position") => {
                 if prev_cmd.contains("moves")
@@ -61,6 +79,7 @@ pub fn uci() {
                     }
                     for m in move_list.split(" ") {
                         board = board.make_move_new(ChessMove::from_str(m).unwrap());
+                        add_repetition(&mut repetition_table, board.get_hash());
                     }
                 } else {
                     if string.starts_with("position fen") {
@@ -76,6 +95,7 @@ pub fn uci() {
                         let move_list = string[(i + 5)..string.len()].trim();
                         for m in move_list.split(" ") {
                             board = board.make_move_new(ChessMove::from_str(m).unwrap());
+                            add_repetition(&mut repetition_table, board.get_hash());
                         }
                         let book_res = book.check(move_list);
                         match book_res {
@@ -136,7 +156,13 @@ pub fn uci() {
                     } else {
                         allocated_time = Duration::new(3, 0);
                     }
-                    let res = start_search(&board, 20, allocated_time, &mut tt);
+                    let res = start_search(
+                        &board,
+                        20,
+                        allocated_time,
+                        &mut tt,
+                        &get_possible_drawns(&repetition_table),
+                    );
                     println!("bestmove {}", res.best_move.to_string());
                 }
             }

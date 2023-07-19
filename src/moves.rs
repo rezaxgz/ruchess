@@ -1,15 +1,14 @@
 const NOT_FILE_A_BB: u64 = !72340172838076673;
 const NOT_FILE_H_BB: u64 = !(72340172838076673 << 7);
 const MVV_LVA: [[i8; 6]; 5] = [
-    [15, 14, 13, 12, 11, 10], // victim P, attacker K, Q, R, B, N, P, None
-    [25, 24, 23, 22, 21, 20], // victim N, attacker K, Q, R, B, N, P, None
-    [35, 34, 33, 32, 31, 30], // victim B, attacker K, Q, R, B, N, P, None
-    [45, 44, 43, 42, 41, 40], // victim R, attacker K, Q, R, B, N, P, None
-    [55, 54, 53, 52, 51, 50], // victim Q, attacker K, Q, R, B, N, P, None
+    [15, 14, 13, 12, 11, 10], // victim P, attacker P, N, B, R, Q, K
+    [25, 24, 23, 22, 21, 20], // victim N, attacker P, N, B, R, Q, K
+    [35, 34, 33, 32, 31, 30], // victim B, attacker P, N, B, R, Q, K
+    [45, 44, 43, 42, 41, 40], // victim R, attacker P, N, B, R, Q, K
+    [55, 54, 53, 52, 51, 50], // victim Q, attacker P, N, B, R, Q, K
 ];
-use chess::{Board, ChessMove, Color, MoveGen, Piece};
-
 use crate::data::get_spst_value;
+use chess::{Board, ChessMove, Color, MoveGen, Piece};
 fn piece_value(piece: Piece) -> i8 {
     match piece {
         Piece::Pawn => 1,

@@ -125,6 +125,7 @@ fn search(
     max_depth: u8,
     init: &Instant,
     tt: &mut TranspositionTable,
+    draws: &Vec<u64>,
 ) -> SearchResult {
     let start = Instant::now();
     let mut best_move = *moves.get(0).unwrap();
@@ -132,8 +133,48 @@ fn search(
     let mut ext_moves = Vec::<(ChessMove, i16)>::with_capacity(moves.len());
     for i in 0..moves.len() {
         let mv = moves[i];
+        let piece = board.piece_on(mv.get_source()).unwrap();
         let new_board = board.make_move_new(mv);
-        let score = -alpha_beta(&new_board, 1, max_depth - 1, 0, -BETA, -alpha, init, tt);
+        let mut score = 0;
+        if !draws.contains(&new_board.get_hash()) {
+            let mut extention = if board.checkers().0 != 0 { 1 } else { 0 };
+            let rank = mv.get_dest().get_rank();
+            if piece == Piece::Pawn && (rank == Rank::Second || rank == Rank::Seventh) {
+                extention += 1;
+            }
+            let reduction = if i > 4 && extention == 0 && max_depth > 2 {
+                1
+            } else {
+                0
+            };
+            let mut needs_full_search = true;
+            if reduction == 1 {
+                score = -alpha_beta(
+                    &new_board,
+                    1,
+                    max_depth - 1 - reduction,
+                    extention,
+                    -BETA,
+                    -alpha,
+                    init,
+                    tt,
+                );
+                needs_full_search = score > alpha;
+            }
+            if needs_full_search {
+                score = -alpha_beta(
+                    &new_board,
+                    1,
+                    max_depth - 1 + extention,
+                    extention,
+                    -BETA,
+                    -alpha,
+                    init,
+                    tt,
+                );
+            }
+        }
+
         if score == (NEG_SEARCH_EXIT_KEY) {
             return SearchResult {
                 eval: SEARCH_EXIT_KEY,
@@ -165,6 +206,7 @@ pub fn start_search(
     max_depth: u8,
     max_duration: Duration,
     tt: &mut TranspositionTable,
+    draws: &Vec<u64>,
 ) -> SearchResult {
     unsafe {
         TIME_LIMIT = max_duration;
@@ -172,12 +214,12 @@ pub fn start_search(
     let start = Instant::now();
     let mut iterable = MoveGen::new_legal(&board);
     let mut moves = sort_moves(&mut iterable, board);
-    let mut result = search(board, &mut moves, 1, &start, tt);
+    let mut result = search(board, &mut moves, 1, &start, tt, draws);
     if moves.len() == 1 {
         return result;
     }
     for i in 2..=max_depth {
-        let res = search(board, &mut moves, i, &start, tt);
+        let res = search(board, &mut moves, i, &start, tt, draws);
         if res.eval != SEARCH_EXIT_KEY {
             result = res;
         } else {
@@ -199,5 +241,6 @@ pub fn search_at_fixed_depth(board: &Board, depth: u8) -> SearchResult {
         depth,
         &Instant::now(),
         &mut TranspositionTable::init(),
+        &vec![],
     );
 }
