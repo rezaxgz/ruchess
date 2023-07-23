@@ -11,16 +11,6 @@ const TT_MOVE_VALUE: i8 = 55;
 
 use crate::data::get_spst_value;
 use chess::{Board, ChessMove, Color, MoveGen, Piece};
-// fn piece_value(piece: Piece) -> i8 {
-//     match piece {
-//         Piece::Pawn => 1,
-//         Piece::Bishop => 3,
-//         Piece::Knight => 3,
-//         Piece::Rook => 5,
-//         Piece::Queen => 9,
-//         Piece::King => 0,
-//     }
-// }
 fn promotion_value(piece: Piece) -> i8 {
     match piece {
         Piece::Pawn => 0,
