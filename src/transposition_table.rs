@@ -5,18 +5,20 @@ const KEY: u64 = NUM_OF_POSITIONS as u64 - 1;
 
 // const NUM_OF_PAWNENTRIES: usize = 8192;
 // const PAWN_KEY: u64 = NUM_OF_PAWNENTRIES as u64 - 1;
+#[derive(PartialEq)]
 pub enum EntryType {
-    Exact = 0,
-    #[allow(dead_code)]
-    LowerBound = 1,
-    UpperBound = 2,
+    Exact,
+    LowerBound,
+    UpperBound,
 }
 pub struct PositionEntry {
     pub key: u64,
     pub eval: i16,
     pub entry_type: EntryType,
     pub depth: u8,
+    ply: u8,
     pub best_move: ChessMove,
+    age: u16,
 }
 // pub struct PawnEntry {
 //     pub key: u64,
@@ -45,7 +47,9 @@ impl TranspositionTable {
                 eval: 0,
                 entry_type: EntryType::Exact,
                 depth: 0,
+                ply: 0,
                 best_move: ChessMove::default(),
+                age: 0,
             });
         }
         // for i in 0..NUM_OF_PAWNENTRIES {
@@ -63,12 +67,9 @@ impl TranspositionTable {
         return x;
     }
     pub fn look_up_pos(&self, key: u64) -> Option<&PositionEntry> {
-        let i = key & KEY;
-        let res = self.table.get(i as usize);
-        if res.is_some() {
-            if res.unwrap().key != key {
-                return None;
-            }
+        let res = self.table.get((key & KEY) as usize);
+        if res.unwrap().key != key {
+            return None;
         }
         return res;
     }
@@ -78,15 +79,36 @@ impl TranspositionTable {
         eval: i16,
         entry_type: EntryType,
         depth: u8,
+        ply: u8,
         best_move: ChessMove,
+        age: u16,
     ) {
         //TODO: replacement strategy
-        self.table[(key & KEY) as usize] = PositionEntry {
-            key,
-            eval,
-            entry_type,
-            depth,
-            best_move,
+        let prev_entry = self.table.get((key & KEY) as usize).unwrap();
+        if prev_entry.key == (key & KEY) + 1 {
+            self.table[(key & KEY) as usize] = PositionEntry {
+                key,
+                eval,
+                entry_type,
+                depth,
+                ply,
+                best_move,
+                age,
+            };
+            return;
+        }
+        let value = (depth * ply) as u16 + age;
+        let prev_value = (prev_entry.depth * prev_entry.ply) as u16 + prev_entry.age;
+        if value >= prev_value {
+            self.table[(key & KEY) as usize] = PositionEntry {
+                key,
+                eval,
+                entry_type,
+                depth,
+                ply,
+                best_move,
+                age,
+            };
         }
     }
     pub fn clear(&mut self) {
@@ -96,12 +118,13 @@ impl TranspositionTable {
                 eval: 0,
                 entry_type: EntryType::Exact,
                 depth: 0,
+                ply: 0,
                 best_move: ChessMove::default(),
+                age: 0,
             };
         }
         // self.pawns.clear();
     }
-
     // pub fn look_up_pawns(&self, key: u64) -> Option<&PawnEntry> {
     //     let i = key & PAWN_KEY;
     //     let res = self.pawns.get(i as usize);

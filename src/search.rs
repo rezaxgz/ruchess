@@ -57,15 +57,8 @@ fn alpha_beta(
     beta: i16,
     init: &Instant,
     tt: &mut TranspositionTable,
+    age: u16,
 ) -> i16 {
-    let key = board.get_hash();
-    let tt_value = tt.look_up_pos(key);
-    if tt_value.is_some() && ply_from_root < 3 && (depth <= tt_value.unwrap().depth) {
-        return tt_value.unwrap().eval;
-    }
-    if depth == 0 {
-        return quiesce(board, alpha, beta, ply_from_root + 1);
-    }
     unsafe {
         if init.elapsed() >= TIME_LIMIT {
             return SEARCH_EXIT_KEY;
@@ -77,8 +70,33 @@ fn alpha_beta(
     } else if status == BoardStatus::Stalemate {
         return 0;
     }
+    let key = board.get_hash();
+    let tt_value = tt.look_up_pos(key);
+    let tt_move = if tt_value.is_some() {
+        tt_value.unwrap().best_move
+    } else {
+        ChessMove::default()
+    };
+    if tt_value.is_some() && (depth <= tt_value.unwrap().depth) {
+        match tt_value.unwrap().entry_type {
+            EntryType::Exact => return tt_value.unwrap().eval,
+            EntryType::UpperBound => {
+                if tt_value.unwrap().eval <= alpha {
+                    return alpha;
+                }
+            }
+            EntryType::LowerBound => {
+                if tt_value.unwrap().eval >= beta {
+                    return beta;
+                }
+            }
+        }
+    }
+    if depth == 0 {
+        return quiesce(board, alpha, beta, ply_from_root + 1);
+    }
     let mut iterable = MoveGen::new_legal(&board);
-    let moves = sort_moves(&mut iterable, board);
+    let moves = sort_moves(&mut iterable, board, tt_move);
     let mut best_move = ChessMove::default();
     let mut alpha = alpha;
     let mut tt_type = EntryType::UpperBound;
@@ -86,6 +104,7 @@ fn alpha_beta(
     for i in 0..moves.len() {
         let mv = moves[i];
         let piece = board.piece_on(mv.get_source()).unwrap();
+        let is_capture = board.piece_on(mv.get_dest()).is_some();
         let new_board = board.make_move_new(mv);
         let is_check = board.checkers().0 != 0;
         let mut extention = if is_check && extended < 6 { 1 } else { 0 };
@@ -93,21 +112,59 @@ fn alpha_beta(
         if piece == Piece::Pawn && (rank == Rank::Second || rank == Rank::Seventh) {
             extention += 1;
         }
-        let score = -alpha_beta(
-            &new_board,
-            ply_from_root + 1,
-            depth + extention - 1,
-            extended + extention,
-            -beta,
-            -alpha,
-            init,
-            tt,
-        );
+        let reduction: u8 = if extention == 0
+            && ply_from_root > 2
+            && !is_capture
+            && i > 4
+            && mv.get_promotion().is_none()
+            && depth > 3
+        {
+            1
+        } else {
+            0
+        };
+        let mut score = 0;
+        let mut needs_full_search = true;
+        if reduction != 0 {
+            score = -alpha_beta(
+                &new_board,
+                ply_from_root + 1,
+                depth - 1 - reduction,
+                extended,
+                -beta,
+                -alpha,
+                init,
+                tt,
+                age,
+            );
+            needs_full_search = score > alpha;
+        }
+        if needs_full_search {
+            score = -alpha_beta(
+                &new_board,
+                ply_from_root + 1,
+                depth + extention - 1,
+                extended + extention,
+                -beta,
+                -alpha,
+                init,
+                tt,
+                age,
+            );
+        }
         if score == NEG_SEARCH_EXIT_KEY {
             return SEARCH_EXIT_KEY;
         }
         if score >= beta {
-            tt.set_pos(key, beta, EntryType::UpperBound, depth, mv);
+            tt.set_pos(
+                key,
+                beta,
+                EntryType::LowerBound,
+                depth,
+                ply_from_root,
+                mv,
+                age,
+            );
             return beta;
         }
         if score > alpha {
@@ -116,7 +173,7 @@ fn alpha_beta(
             best_move = mv;
         }
     }
-    tt.set_pos(key, alpha, tt_type, depth, best_move);
+    tt.set_pos(key, alpha, tt_type, depth, ply_from_root, best_move, age);
     return alpha;
 }
 fn search(
@@ -126,6 +183,7 @@ fn search(
     init: &Instant,
     tt: &mut TranspositionTable,
     draws: &Vec<u64>,
+    age: u16,
 ) -> SearchResult {
     let start = Instant::now();
     let mut best_move = *moves.get(0).unwrap();
@@ -158,6 +216,7 @@ fn search(
                     -alpha,
                     init,
                     tt,
+                    age,
                 );
                 needs_full_search = score > alpha;
             }
@@ -171,6 +230,7 @@ fn search(
                     -alpha,
                     init,
                     tt,
+                    age,
                 );
             }
         }
@@ -207,19 +267,20 @@ pub fn start_search(
     max_duration: Duration,
     tt: &mut TranspositionTable,
     draws: &Vec<u64>,
+    age: u16,
 ) -> SearchResult {
     unsafe {
         TIME_LIMIT = max_duration;
     }
     let start = Instant::now();
     let mut iterable = MoveGen::new_legal(&board);
-    let mut moves = sort_moves(&mut iterable, board);
-    let mut result = search(board, &mut moves, 1, &start, tt, draws);
+    let mut moves = sort_moves(&mut iterable, board, ChessMove::default());
+    let mut result = search(board, &mut moves, 1, &start, tt, draws, age);
     if moves.len() == 1 {
         return result;
     }
     for i in 2..=max_depth {
-        let res = search(board, &mut moves, i, &start, tt, draws);
+        let res = search(board, &mut moves, i, &start, tt, draws, age);
         if res.eval != SEARCH_EXIT_KEY {
             result = res;
         } else {
@@ -234,7 +295,7 @@ pub fn search_at_fixed_depth(board: &Board, depth: u8) -> SearchResult {
         TIME_LIMIT = Duration::MAX;
     }
     let mut iterable = MoveGen::new_legal(&board);
-    let mut moves = sort_moves(&mut iterable, board);
+    let mut moves = sort_moves(&mut iterable, board, ChessMove::default());
     return search(
         board,
         &mut moves,
@@ -242,5 +303,6 @@ pub fn search_at_fixed_depth(board: &Board, depth: u8) -> SearchResult {
         &Instant::now(),
         &mut TranspositionTable::init(),
         &vec![],
+        0,
     );
 }

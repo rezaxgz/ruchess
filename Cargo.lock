@@ -286,6 +286,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruchess"
+version = "0.1.0"
+dependencies = [
+ "chess",
+ "rand 0.8.5",
+ "rust-embed",
+]
+
+[[package]]
 name = "rust-embed"
 version = "6.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,15 +326,6 @@ checksum = "9d38ff6bf570dc3bb7100fce9f7b60c33fa71d80e88da3f2580df4ff2bdded74"
 dependencies = [
  "sha2",
  "walkdir",
-]
-
-[[package]]
-name = "rust-lib"
-version = "0.1.0"
-dependencies = [
- "chess",
- "rand 0.8.5",
- "rust-embed",
 ]
 
 [[package]]
