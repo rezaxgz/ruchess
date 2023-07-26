@@ -186,7 +186,7 @@ fn search(
     age: u16,
 ) -> SearchResult {
     let start = Instant::now();
-    let mut best_move = *moves.get(0).unwrap();
+    let mut best_move = moves[0];
     let mut alpha = ALPHA;
     let mut ext_moves = Vec::<(ChessMove, i16)>::with_capacity(moves.len());
     for i in 0..moves.len() {
@@ -236,8 +236,17 @@ fn search(
         }
 
         if score == (NEG_SEARCH_EXIT_KEY) {
+            tt.set_pos(
+                board.get_hash(),
+                alpha,
+                EntryType::Exact,
+                max_depth,
+                0,
+                best_move,
+                age,
+            );
             return SearchResult {
-                eval: SEARCH_EXIT_KEY,
+                eval: alpha,
                 best_move,
                 depth: max_depth,
                 duration: start.elapsed(),
@@ -254,6 +263,15 @@ fn search(
     for i in ext_moves {
         moves.push(i.0);
     }
+    tt.set_pos(
+        board.get_hash(),
+        alpha,
+        EntryType::Exact,
+        max_depth,
+        0,
+        best_move,
+        age,
+    );
     return SearchResult {
         eval: alpha,
         best_move,
@@ -281,9 +299,8 @@ pub fn start_search(
     }
     for i in 2..=max_depth {
         let res = search(board, &mut moves, i, &start, tt, draws, age);
-        if res.eval != SEARCH_EXIT_KEY {
-            result = res;
-        } else {
+        result = res;
+        if start.elapsed() >= max_duration {
             break;
         }
     }

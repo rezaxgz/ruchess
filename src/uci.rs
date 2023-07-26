@@ -62,7 +62,13 @@ pub fn uci() {
             }
             "quit" => std::process::exit(0),
             "print" => print_board(&board),
-
+            "pv" => println!(
+                "{:?}",
+                tt.get_pv(&board)
+                    .into_iter()
+                    .map(|a| a.to_string())
+                    .collect::<Vec<String>>()
+            ),
             a if a.starts_with("position") => {
                 if prev_cmd.contains("moves")
                     && prev_cmd.len() > 0
@@ -172,6 +178,7 @@ pub fn uci() {
                         &get_possible_drawns(&repetition_table),
                         halfmoves,
                     );
+                    println!("info finished depth {} time {:?}", res.depth, res.duration);
                     println!("bestmove {}", res.best_move.to_string());
                 }
             }

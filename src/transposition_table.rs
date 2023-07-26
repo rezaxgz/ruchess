@@ -1,4 +1,4 @@
-use chess::ChessMove;
+use chess::{Board, ChessMove};
 
 const NUM_OF_POSITIONS: usize = 0x400000;
 const KEY: u64 = NUM_OF_POSITIONS as u64 - 1;
@@ -125,16 +125,19 @@ impl TranspositionTable {
         }
         // self.pawns.clear();
     }
-    // pub fn look_up_pawns(&self, key: u64) -> Option<&PawnEntry> {
-    //     let i = key & PAWN_KEY;
-    //     let res = self.pawns.get(i as usize);
-    //     if res.is_some() && res.unwrap().key != key {
-    //         return None;
-    //     }
-    //     return res;
-    // }
-    // pub fn set_pawns(&mut self, key: u64, entry: PawnEntry) {
-    //     //TODO: replacement strategy
-    //     self.pawns[(key & PAWN_KEY) as usize] = entry
-    // }
+    pub fn get_pv(&self, board: &Board) -> Vec<ChessMove> {
+        let mut pv = Vec::<ChessMove>::new();
+        let mut hash = board.get_hash();
+        let mut b = *board;
+        loop {
+            let res = self.look_up_pos(hash);
+            if res.is_none() {
+                break;
+            }
+            b = b.make_move_new(res.unwrap().best_move);
+            hash = b.get_hash();
+            pv.push(res.unwrap().best_move);
+        }
+        return pv;
+    }
 }
