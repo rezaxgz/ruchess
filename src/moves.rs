@@ -8,8 +8,8 @@ const MVV_LVA: [[i8; 6]; 5] = [
     [55, 54, 53, 52, 51, 50], // victim Q, attacker P, N, B, R, Q, K
 ];
 const TT_MOVE_VALUE: i8 = 55;
-
-use crate::data::get_spst_value;
+const KILLER_MOVE_VALUE: i8 = 55;
+use crate::{data::get_spst_value, transposition_table::Killers};
 use chess::{Board, ChessMove, Color, MoveGen, Piece};
 fn promotion_value(piece: Piece) -> i8 {
     match piece {
@@ -28,6 +28,7 @@ fn move_value(
     is_controled: bool,
     color: Color,
     is_tt_move: bool,
+    is_killer: bool,
 ) -> i8 {
     let mut value: i8 = get_spst_value(color, piece_at_start, m.get_dest())
         - get_spst_value(color, piece_at_start, m.get_source());
@@ -40,12 +41,23 @@ fn move_value(
     } else if m.get_promotion().is_some() {
         value += promotion_value(m.get_promotion().unwrap());
     }
+    if is_killer {
+        if is_tt_move {
+            return i8::MAX;
+        }
+        value += KILLER_MOVE_VALUE;
+    }
     if is_tt_move {
         value += TT_MOVE_VALUE;
     }
     return value;
 }
-pub fn sort_moves(iterable: &mut MoveGen, board: &Board, tt_move: ChessMove) -> Vec<ChessMove> {
+pub fn sort_moves(
+    iterable: &mut MoveGen,
+    board: &Board,
+    tt_move: ChessMove,
+    killer_moves: &Killers,
+) -> Vec<ChessMove> {
     let pawns = board.pieces(Piece::Pawn);
     let controled = if board.side_to_move() == Color::White {
         ((pawns & board.color_combined(Color::Black)).0 >> 9 & NOT_FILE_H_BB)
@@ -65,6 +77,7 @@ pub fn sort_moves(iterable: &mut MoveGen, board: &Board, tt_move: ChessMove) -> 
                 (controled & (1 << mv.get_dest().to_index())) != 0,
                 board.side_to_move(),
                 mv == tt_move,
+                killer_moves.contains(&mv),
             ),
         ));
     }

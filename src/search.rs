@@ -96,7 +96,12 @@ fn alpha_beta(
         return quiesce(board, alpha, beta, ply_from_root + 1);
     }
     let mut iterable = MoveGen::new_legal(&board);
-    let moves = sort_moves(&mut iterable, board, tt_move);
+    let moves = sort_moves(
+        &mut iterable,
+        board,
+        tt_move,
+        tt.get_killers(ply_from_root as usize),
+    );
     let mut best_move = ChessMove::default();
     let mut alpha = alpha;
     let mut tt_type = EntryType::UpperBound;
@@ -156,6 +161,7 @@ fn alpha_beta(
             return SEARCH_EXIT_KEY;
         }
         if score >= beta {
+            tt.store_killer(ply_from_root as usize, mv);
             tt.set_pos(
                 key,
                 beta,
@@ -236,15 +242,6 @@ fn search(
         }
 
         if score == (NEG_SEARCH_EXIT_KEY) {
-            tt.set_pos(
-                board.get_hash(),
-                alpha,
-                EntryType::Exact,
-                max_depth,
-                0,
-                best_move,
-                age,
-            );
             return SearchResult {
                 eval: alpha,
                 best_move,
@@ -292,7 +289,12 @@ pub fn start_search(
     }
     let start = Instant::now();
     let mut iterable = MoveGen::new_legal(&board);
-    let mut moves = sort_moves(&mut iterable, board, ChessMove::default());
+    let mut moves = sort_moves(
+        &mut iterable,
+        board,
+        ChessMove::default(),
+        &tt.default_killers,
+    );
     let mut result = search(board, &mut moves, 1, &start, tt, draws, age);
     if moves.len() == 1 {
         return result;
@@ -300,6 +302,12 @@ pub fn start_search(
     for i in 2..=max_depth {
         let res = search(board, &mut moves, i, &start, tt, draws, age);
         result = res;
+        // println!(
+        //     "info depth {} bestmove {} ({})",
+        //     i,
+        //     result.best_move.to_string(),
+        //     result.eval
+        // );
         if start.elapsed() >= max_duration {
             break;
         }
@@ -312,13 +320,19 @@ pub fn search_at_fixed_depth(board: &Board, depth: u8) -> SearchResult {
         TIME_LIMIT = Duration::MAX;
     }
     let mut iterable = MoveGen::new_legal(&board);
-    let mut moves = sort_moves(&mut iterable, board, ChessMove::default());
+    let mut tt = TranspositionTable::init();
+    let mut moves = sort_moves(
+        &mut iterable,
+        board,
+        ChessMove::default(),
+        &tt.default_killers,
+    );
     return search(
         board,
         &mut moves,
         depth,
         &Instant::now(),
-        &mut TranspositionTable::init(),
+        &mut tt,
         &vec![],
         0,
     );

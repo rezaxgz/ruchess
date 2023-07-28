@@ -178,7 +178,6 @@ pub fn uci() {
                         &get_possible_drawns(&repetition_table),
                         halfmoves,
                     );
-                    println!("info finished depth {} time {:?}", res.depth, res.duration);
                     println!("bestmove {}", res.best_move.to_string());
                 }
             }

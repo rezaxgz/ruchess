@@ -34,7 +34,7 @@ pub fn evaluate(board: &Board) -> i16 {
     let wr = board.pieces(Piece::Rook) & board.color_combined(Color::White);
     let br = board.pieces(Piece::Rook) & board.color_combined(Color::Black);
     white_material +=
-        (board.pieces(Piece::Knight) & board.color_combined(Color::White)).popcnt() * 300;
+        (board.pieces(Piece::Knight) & board.color_combined(Color::White)).popcnt() * 310;
     white_material +=
         (board.pieces(Piece::Bishop) & board.color_combined(Color::White)).popcnt() * 320;
     white_material += wr.popcnt() * 500;
@@ -43,7 +43,7 @@ pub fn evaluate(board: &Board) -> i16 {
     let white_material_without_pawns = white_material as f32;
     white_material += wp.popcnt() * 100;
     black_material +=
-        (board.pieces(Piece::Knight) & board.color_combined(Color::Black)).popcnt() * 300;
+        (board.pieces(Piece::Knight) & board.color_combined(Color::Black)).popcnt() * 310;
     black_material +=
         (board.pieces(Piece::Bishop) & board.color_combined(Color::Black)).popcnt() * 320;
     black_material += br.popcnt() * 500;

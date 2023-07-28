@@ -2,7 +2,9 @@ use chess::{Board, ChessMove};
 
 const NUM_OF_POSITIONS: usize = 0x400000;
 const KEY: u64 = NUM_OF_POSITIONS as u64 - 1;
-
+const KILLERS_PER_PLY: usize = 3;
+const KILLER_PLIES: usize = 20;
+pub type Killers = [ChessMove; KILLERS_PER_PLY];
 // const NUM_OF_PAWNENTRIES: usize = 8192;
 // const PAWN_KEY: u64 = NUM_OF_PAWNENTRIES as u64 - 1;
 #[derive(PartialEq)]
@@ -32,6 +34,8 @@ pub struct PositionEntry {
 // }
 pub struct TranspositionTable {
     table: Vec<PositionEntry>,
+    killers: [Killers; KILLER_PLIES],
+    pub default_killers: Killers,
     // pawns: Vec<PawnEntry>,
 }
 impl TranspositionTable {
@@ -39,7 +43,8 @@ impl TranspositionTable {
     pub fn init() -> TranspositionTable {
         let mut x = TranspositionTable {
             table: Vec::<PositionEntry>::with_capacity(NUM_OF_POSITIONS),
-            // pawns: Vec::<PawnEntry>::with_capacity(NUM_OF_PAWNENTRIES),
+            killers: [[ChessMove::default(); KILLERS_PER_PLY]; KILLER_PLIES],
+            default_killers: [ChessMove::default(); KILLERS_PER_PLY],
         };
         for i in 0..NUM_OF_POSITIONS {
             x.table.push(PositionEntry {
@@ -52,18 +57,6 @@ impl TranspositionTable {
                 age: 0,
             });
         }
-        // for i in 0..NUM_OF_PAWNENTRIES {
-        //     x.pawns.push(PawnEntry {
-        //         key: i as u64 + 1,
-        //         eval: 0,
-        //         closed: 0,
-        //         semi_open_w: 0,
-        //         semi_open_b: 0,
-        //         open: 0,
-        //         wpassers: 0,
-        //         bpassers: 0,
-        //     });
-        // }
         return x;
     }
     pub fn look_up_pos(&self, key: u64) -> Option<&PositionEntry> {
@@ -83,7 +76,6 @@ impl TranspositionTable {
         best_move: ChessMove,
         age: u16,
     ) {
-        //TODO: replacement strategy
         let prev_entry = self.table.get((key & KEY) as usize).unwrap();
         if prev_entry.key == (key & KEY) + 1 {
             self.table[(key & KEY) as usize] = PositionEntry {
@@ -123,7 +115,7 @@ impl TranspositionTable {
                 age: 0,
             };
         }
-        // self.pawns.clear();
+        self.killers = [[ChessMove::default(); KILLERS_PER_PLY]; KILLER_PLIES];
     }
     pub fn get_pv(&self, board: &Board) -> Vec<ChessMove> {
         let mut pv = Vec::<ChessMove>::new();
@@ -139,5 +131,20 @@ impl TranspositionTable {
             pv.push(res.unwrap().best_move);
         }
         return pv;
+    }
+    pub fn get_killers(&self, ply: usize) -> &Killers {
+        if ply >= KILLER_PLIES {
+            return &self.default_killers;
+        }
+        return &self.killers[ply];
+    }
+    pub fn store_killer(&mut self, ply: usize, mv: ChessMove) {
+        if ply >= KILLER_PLIES || self.killers[ply].contains(&mv) {
+            return;
+        }
+        for i in 1..KILLERS_PER_PLY {
+            self.killers[ply][i] = self.killers[ply][i - 1];
+        }
+        self.killers[ply][0] = mv;
     }
 }
