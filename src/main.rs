@@ -1,4 +1,4 @@
-mod benchmark;
+mod board;
 mod board_util;
 mod book;
 mod data;

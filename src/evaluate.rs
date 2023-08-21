@@ -1,23 +1,27 @@
+use crate::board::Position;
 use crate::data::{
-    get_distance_from_center, get_orthogonal_distance, get_pst_value, ADJACENT_FILES, FILESETS,
-    FRONT_SPANS,
+    calc_king_pst, get_adjacent_files, get_distance_from_center, get_fileset_bb, get_front_spans,
+    get_orthogonal_distance, DARK_SQUARES, FILES, LIGHT_SQUARES, PAWN_SQUARE_TABLES,
+    PIECE_SQUARE_TABLES,
 };
-use chess::{Board, Color, Piece, Square};
-
-const ENDGAME_MATERIAL_START: f32 = (500 * 2 + 320 + 300) as f32;
+use crate::transposition_table::TranspositionTable;
+use chess::BitBoard;
+use chess::{
+    Color::Black, Color::White, Piece::Bishop, Piece::Knight, Piece::Pawn, Piece::Queen,
+    Piece::Rook,
+};
+pub static mut PAWN_TT_HITS: u32 = 0;
+const LAZY_EXIT_MARGIN: i16 = 300;
+const PAWN_VALUE: u32 = 100;
+const KNIGHT_VALUE: u32 = 310;
+const BISHOP_VALUE: u32 = 320;
+const ROOK_VALUE: u32 = 500;
+const QUEEN_VALUE: u32 = 975;
+const ENDGAME_MATERIAL_START: f32 = (ROOK_VALUE * 2 + BISHOP_VALUE + KNIGHT_VALUE) as f32;
 const MULTIPLIER: f32 = 1.0 / ENDGAME_MATERIAL_START as f32;
 const PASSED_PAWN_VALUES: [i16; 7] = [0, 90, 60, 40, 25, 15, 15];
-const ISOLATED_PAWN_PENALTY: [i16; 9] = [0, -10, -25, -50, -80, -85, -90, -95, -100];
-// const UNHEALTHY_PAWN_PENALTY: [i16; 8] = [0, -10, -25, -40, -60, -80, -90, -100];
-// const FLANKS: [u64; 3] = [
-//     FILES[0] | FILES[1] | FILES[2],
-//     FILES[3] | FILES[4],
-//     FILES[5] | FILES[6] | FILES[7],
-// ];
-// const NOT_RANK_2: u64 = !0xFF00;
-// const NOT_RANK_7: u64 = !0xFF000000000000;
-// const RANK_2: u64 = 0xFF00;
-// const RANK_7: u64 = 0xFF000000000000;
+const BISHOP_PAIR_VALUE: i16 = 50;
+
 fn get_endgame_weight(material: f32) -> f32 {
     if material < ENDGAME_MATERIAL_START {
         return 1.0 - (material * MULTIPLIER);
@@ -25,85 +29,98 @@ fn get_endgame_weight(material: f32) -> f32 {
         return 0.0;
     };
 }
-pub fn evaluate(board: &Board) -> i16 {
-    let mut white_material: u32 = 0;
-    let mut black_material: u32 = 0;
+fn evaluate_bishop_pair(bishops: u64) -> i16 {
+    if ((bishops & LIGHT_SQUARES) != 0) && ((bishops & DARK_SQUARES) != 0) {
+        return BISHOP_PAIR_VALUE;
+    }
+    return 0;
+}
+fn get_material(board: &Position, color: &BitBoard) -> (f32, i16) {
+    let material = (board.pieces(Knight) & color).popcnt() * KNIGHT_VALUE
+        + (board.pieces(Bishop) & color).popcnt() * BISHOP_VALUE
+        + (board.pieces(Rook) & color).popcnt() * ROOK_VALUE
+        + (board.pieces(Queen) & color).popcnt() * QUEEN_VALUE;
+    return (
+        material as f32,
+        (material + ((board.pieces(Pawn) & color).popcnt() * PAWN_VALUE)) as i16,
+    );
+}
+pub fn evaluate(board: &Position, tt: &mut TranspositionTable, alpha: i16, beta: i16) -> i16 {
+    let white_combined = board.color_combined(White);
+    let black_combined = board.color_combined(Black);
 
-    let wp = board.pieces(Piece::Pawn) & board.color_combined(Color::White);
-    let bp = board.pieces(Piece::Pawn) & board.color_combined(Color::Black);
-    let wr = board.pieces(Piece::Rook) & board.color_combined(Color::White);
-    let br = board.pieces(Piece::Rook) & board.color_combined(Color::Black);
-    white_material +=
-        (board.pieces(Piece::Knight) & board.color_combined(Color::White)).popcnt() * 310;
-    white_material +=
-        (board.pieces(Piece::Bishop) & board.color_combined(Color::White)).popcnt() * 320;
-    white_material += wr.popcnt() * 500;
-    white_material +=
-        (board.pieces(Piece::Queen) & board.color_combined(Color::White)).popcnt() * 900;
-    let white_material_without_pawns = white_material as f32;
-    white_material += wp.popcnt() * 100;
-    black_material +=
-        (board.pieces(Piece::Knight) & board.color_combined(Color::Black)).popcnt() * 310;
-    black_material +=
-        (board.pieces(Piece::Bishop) & board.color_combined(Color::Black)).popcnt() * 320;
-    black_material += br.popcnt() * 500;
-    black_material +=
-        (board.pieces(Piece::Queen) & board.color_combined(Color::Black)).popcnt() * 900;
-    let black_material_without_pawns = black_material as f32;
-    black_material += bp.popcnt() * 100;
+    let wp = board.pieces(Pawn) & white_combined;
+    let bp = board.pieces(Pawn) & black_combined;
+    let wr = board.pieces(Rook) & white_combined;
+    let br = board.pieces(Rook) & black_combined;
+
+    let (white_material_without_pawns, white_material) = get_material(board, white_combined);
+    let (black_material_without_pawns, black_material) = get_material(board, black_combined);
 
     let white_endgame = get_endgame_weight(white_material_without_pawns);
     let black_endgame = get_endgame_weight(black_material_without_pawns);
 
     let white_middlegame = 1.0 - white_endgame;
     let black_middlegame = 1.0 - black_endgame;
-    let mut piece_scores = 0;
-    for i in 0..64 {
-        unsafe {
-            let sq = Square::new(i);
-            let p = board.piece_on(sq);
-            if p.is_some() {
-                let piece = p.unwrap();
-                let color = board.color_on(sq).unwrap().to_index();
-                if color == 0 {
-                    piece_scores +=
-                        get_pst_value(color, piece, i as usize, black_endgame, black_middlegame);
-                } else {
-                    piece_scores +=
-                        get_pst_value(color, piece, i as usize, white_endgame, white_middlegame);
-                }
-            }
-        }
-    }
-    //TODO:
-    //king safety
+
+    let piece_scores = board.get_pst_values()
+        + calc_king_pst(
+            0,
+            board.king_square(White).to_index(),
+            black_endgame,
+            black_middlegame,
+        )
+        + calc_king_pst(
+            1,
+            board.king_square(Black).to_index(),
+            white_endgame,
+            white_middlegame,
+        );
+
     let mop_eval: i16 = mop_up_eval(
-        board.king_square(Color::White).to_index(),
-        board.king_square(Color::Black).to_index(),
+        board.king_square(White).to_index(),
+        board.king_square(Black).to_index(),
         white_material_without_pawns,
         black_material_without_pawns,
         black_endgame,
     ) - mop_up_eval(
-        board.king_square(Color::Black).to_index(),
-        board.king_square(Color::White).to_index(),
+        board.king_square(Black).to_index(),
+        board.king_square(White).to_index(),
         black_material_without_pawns,
         white_material_without_pawns,
         white_endgame,
     );
-    let wpawns = evaluate_pawns(wp.0, bp.0, 0);
-    let bpawns = evaluate_pawns(bp.0, wp.0, 1);
-    let pawn_eval = wpawns.0 - bpawns.0;
-    // let closed = wpawns.1 & bpawns.1;
-    let open = (!wpawns.1) & (!bpawns.1);
-    let semi_open_white = bpawns.1 & (!wpawns.1);
-    let semi_open_black = wpawns.1 & (bpawns.1);
-    let rooks_eval = evaluate_rooks(wr.0, br.0, open, semi_open_white, semi_open_black);
-    let eval = white_material as i16 - black_material as i16
-        + mop_eval
-        + piece_scores
-        + pawn_eval
-        + rooks_eval;
-    if board.side_to_move() == Color::White {
+
+    //lazy exit
+    let mut eval = white_material - black_material + mop_eval + piece_scores;
+    if eval >= beta + LAZY_EXIT_MARGIN || eval + LAZY_EXIT_MARGIN < alpha {
+        if board.side_to_move() == White {
+            return eval;
+        }
+        return -eval;
+    }
+
+    let (pawn_eval, wp_fileset, bp_fileset) = evaluate_pawns(
+        tt,
+        board.get_pawn_hash(),
+        (white_endgame, black_endgame),
+        (white_middlegame, black_middlegame),
+        wp.0,
+        bp.0,
+    );
+    let closed = wp_fileset & bp_fileset;
+    let open = (!wp_fileset) & (!bp_fileset);
+    let semi_open_white = bp_fileset & (!wp_fileset);
+    let semi_open_black = wp_fileset & (bp_fileset);
+
+    let rooks_eval = evaluate_rooks(wr.0, br.0, open, semi_open_white, semi_open_black, closed);
+
+    let bishop_eval = evaluate_bishop_pair((board.pieces(Bishop) & white_combined).0)
+        - evaluate_bishop_pair((board.pieces(Bishop) & black_combined).0);
+
+    eval += pawn_eval + bishop_eval + rooks_eval;
+    // + king_eval;
+    if board.side_to_move() == White {
         return eval;
     }
     return -eval;
@@ -122,43 +139,95 @@ fn mop_up_eval(
     }
     return score;
 }
-fn evaluate_pawns(pawns: u64, enemy_pawns: u64, color: usize) -> (i16, u8) {
+fn get_pawn_data(pawns: u64, enemy_pawns: u64, color: usize) -> (i16, u8, i16, i16) {
     let mut score = 0;
     let mut p = pawns;
-    let mut isolated_pawn_count = 0;
-    // let mut unhealty_pawn_count = 0;
     let mut fileset: u8 = 0;
+    let mut middle_game = 0;
+    let mut endgame = 0;
     while p != 0 {
-        let i = p.trailing_zeros();
-        let file = i & 7;
-        // if ((fileset >> file) & 1) == 1 {
-        //     unhealty_pawn_count += 1;
-        // } else {
-        fileset |= 1 << file;
-        // }
-        unsafe {
-            if FRONT_SPANS[color][i as usize] & enemy_pawns == 0 {
-                let rank = (i >> 3) as usize;
-                score += PASSED_PAWN_VALUES[if color == 0 { 7 - rank } else { rank }];
-            }
-            if (ADJACENT_FILES[file as usize] & pawns) == 0 {
-                //isolated pawn
-                isolated_pawn_count += 1;
-            }
-        }
+        let i = p.trailing_zeros() as usize;
         p &= p - 1;
+        let file = i & 7;
+        endgame += PAWN_SQUARE_TABLES[color][i];
+        middle_game += PIECE_SQUARE_TABLES[color][0][i];
+        let front_span = get_front_spans(color, i) & enemy_pawns;
+        let is_open = front_span & FILES[file] == 0;
+        if ((fileset >> file) & 1) == 1 {
+            //doubled pawn
+            score -= if is_open { 20 } else { 10 };
+        } else {
+            fileset |= 1 << file;
+        }
+        if front_span == 0 {
+            //passer
+            let rank = (i >> 3) as usize;
+            score += PASSED_PAWN_VALUES[if color == 0 { 7 - rank } else { rank }];
+        }
+        if (get_adjacent_files(file) & pawns) == 0 {
+            //isolated pawn
+            score -= if is_open { 20 } else { 10 };
+        }
     }
-    score += ISOLATED_PAWN_PENALTY[isolated_pawn_count];
-    // score -= 15 * unhealty_pawn_count;
-    return (score, fileset);
+    return (score, fileset, middle_game, endgame);
 }
-fn evaluate_rooks(wr: u64, br: u64, open: u8, semi_open_white: u8, semi_open_black: u8) -> i16 {
+fn evaluate_pawns(
+    tt: &mut TranspositionTable,
+    hash: u64,
+    endgame: (f32, f32),
+    middle_game: (f32, f32),
+    wp: u64,
+    bp: u64,
+) -> (i16, u8, u8) {
+    let entry = tt.look_up_pawn_structure(hash);
+    if entry.is_some() {
+        unsafe { PAWN_TT_HITS += 1 }
+        let pawn_data = entry.unwrap();
+        let score = pawn_data.eval
+            + (pawn_data.w_pst.0 as f32 * middle_game.1
+                + pawn_data.w_pst.1 as f32 * endgame.1
+                + pawn_data.b_pst.0 as f32 * middle_game.0
+                + pawn_data.b_pst.1 as f32 * endgame.0) as i16;
+        // + get_value(10, 20, endgame.0) * pawn_data.unhealthy_pawns_count.1 as i16
+        // - get_value(10, 20, endgame.1) * pawn_data.unhealthy_pawns_count.0 as i16;
+        return (score, pawn_data.w_filesets, pawn_data.b_filesets);
+    } else {
+        let w_data = get_pawn_data(wp, bp, 0);
+        let b_data = get_pawn_data(bp, wp, 1);
+        let mut score = w_data.0 - b_data.0;
+        score += (w_data.1 as f32 * middle_game.1
+            + w_data.2 as f32 * endgame.1
+            + b_data.1 as f32 * middle_game.0
+            + b_data.2 as f32 * endgame.0) as i16;
+        tt.set_pawn_struct(
+            hash,
+            w_data.1,
+            b_data.1,
+            (b_data.2, b_data.3),
+            (w_data.2, w_data.3),
+            w_data.0 - b_data.0,
+        );
+        return (score, w_data.1, b_data.1);
+    };
+}
+fn evaluate_rooks(
+    wr: u64,
+    br: u64,
+    open: u8,
+    semi_open_white: u8,
+    semi_open_black: u8,
+    closed: u8,
+) -> i16 {
     let mut score = 0;
-    unsafe {
-        score += (FILESETS[open as usize] & wr).count_ones() as i16 * 30;
-        score += (FILESETS[semi_open_white as usize] & wr).count_ones() as i16 * 20;
-        score -= (FILESETS[open as usize] & br).count_ones() as i16 * 30;
-        score -= (FILESETS[semi_open_black as usize] & br).count_ones() as i16 * 20;
-    }
+    //closed files: -10
+    score -= (get_fileset_bb(closed) & wr).count_ones() as i16 * 10
+        - (get_fileset_bb(closed) & br).count_ones() as i16 * 10;
+
+    score += (get_fileset_bb(open) & wr).count_ones() as i16 * 30;
+
+    score += (get_fileset_bb(semi_open_white) & wr).count_ones() as i16 * 20;
+
+    score -= (get_fileset_bb(open) & br).count_ones() as i16 * 30;
+    score -= (get_fileset_bb(semi_open_black) & br).count_ones() as i16 * 20;
     return score;
 }

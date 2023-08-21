@@ -1,16 +1,19 @@
+use crate::board::Position;
+use crate::evaluate::PAWN_TT_HITS;
 use crate::{
     evaluate::evaluate,
     moves::{sort_captures, sort_moves},
     transposition_table::{EntryType, TranspositionTable},
 };
-use chess::{Board, BoardStatus, ChessMove, MoveGen, Piece, Rank};
+use chess::{BoardStatus, ChessMove, MoveGen, Piece, Rank};
 use std::time::{Duration, Instant};
 const SEARCH_EXIT_KEY: i16 = std::i16::MAX;
 const NEG_SEARCH_EXIT_KEY: i16 = -SEARCH_EXIT_KEY;
 const ALPHA: i16 = -i16::MAX;
 const BETA: i16 = i16::MAX;
-
 static mut TIME_LIMIT: Duration = Duration::new(0, 0);
+static mut NODES: u32 = 0;
+static mut TT_HITS: u32 = 0;
 pub struct SearchResult {
     pub eval: i16,
     pub best_move: ChessMove,
@@ -18,27 +21,24 @@ pub struct SearchResult {
     pub duration: Duration,
 }
 
-fn quiesce(board: &Board, alpha: i16, beta: i16, ply_from_root: u8) -> i16 {
-    let status = board.status();
-    if status == BoardStatus::Checkmate {
-        return -10000 + (ply_from_root as i16);
-    } else if status == BoardStatus::Stalemate {
-        return 0;
-    }
+fn quiesce(board: &Position, alpha: i16, beta: i16, tt: &mut TranspositionTable) -> i16 {
     let mut alpha = alpha;
-    let stand_pat = evaluate(board);
+    unsafe {
+        NODES += 1;
+    }
+    let stand_pat = evaluate(board, tt, alpha, beta);
     if stand_pat >= beta {
         return beta;
     }
     if alpha < stand_pat {
         alpha = stand_pat;
     }
-    let mut iterable = MoveGen::new_legal(&board);
+    let mut iterable = MoveGen::new_legal(&board.board);
     let targets = board.color_combined(!board.side_to_move());
     iterable.set_iterator_mask(*targets);
-    let moves = sort_captures(&mut iterable, board);
+    let moves = sort_captures(&mut iterable, &board.board);
     for mv in moves {
-        let score = -quiesce(&board.make_move_new(mv), -beta, -alpha, ply_from_root + 1);
+        let score = -quiesce(&board.make_move_new(mv), -beta, -alpha, tt);
         if score >= beta {
             return beta;
         }
@@ -49,7 +49,7 @@ fn quiesce(board: &Board, alpha: i16, beta: i16, ply_from_root: u8) -> i16 {
     return alpha;
 }
 fn alpha_beta(
-    board: &Board,
+    board: &Position,
     ply_from_root: u8,
     depth: u8,
     extended: u8,
@@ -78,6 +78,9 @@ fn alpha_beta(
         ChessMove::default()
     };
     if tt_value.is_some() && (depth <= tt_value.unwrap().depth) {
+        unsafe {
+            TT_HITS += 1;
+        }
         match tt_value.unwrap().entry_type {
             EntryType::Exact => return tt_value.unwrap().eval,
             EntryType::UpperBound => {
@@ -90,19 +93,20 @@ fn alpha_beta(
                     return beta;
                 }
             }
+            EntryType::None => {}
         }
     }
     if depth == 0 {
-        return quiesce(board, alpha, beta, ply_from_root + 1);
+        return quiesce(board, alpha, beta, tt);
     }
-    let mut iterable = MoveGen::new_legal(&board);
+    let mut iterable = MoveGen::new_legal(&board.board);
     let moves = sort_moves(
         &mut iterable,
-        board,
+        &board.board,
         tt_move,
         tt.get_killers(ply_from_root as usize),
     );
-    let mut best_move = ChessMove::default();
+    let mut best_move = moves[0];
     let mut alpha = alpha;
     let mut tt_type = EntryType::UpperBound;
     // let mut best_move = ChessMove::default();
@@ -162,15 +166,7 @@ fn alpha_beta(
         }
         if score >= beta {
             tt.store_killer(ply_from_root as usize, mv);
-            tt.set_pos(
-                key,
-                beta,
-                EntryType::LowerBound,
-                depth,
-                ply_from_root,
-                mv,
-                age,
-            );
+            tt.set_pos(key, score, EntryType::LowerBound, depth, mv);
             return beta;
         }
         if score > alpha {
@@ -179,11 +175,11 @@ fn alpha_beta(
             best_move = mv;
         }
     }
-    tt.set_pos(key, alpha, tt_type, depth, ply_from_root, best_move, age);
+    tt.set_pos(key, alpha, tt_type, depth, best_move);
     return alpha;
 }
 fn search(
-    board: &Board,
+    board: &Position,
     moves: &mut Vec<ChessMove>,
     max_depth: u8,
     init: &Instant,
@@ -265,9 +261,7 @@ fn search(
         alpha,
         EntryType::Exact,
         max_depth,
-        0,
         best_move,
-        age,
     );
     return SearchResult {
         eval: alpha,
@@ -277,21 +271,22 @@ fn search(
     };
 }
 pub fn start_search(
-    board: &Board,
+    board: &Position,
     max_depth: u8,
     max_duration: Duration,
     tt: &mut TranspositionTable,
     draws: &Vec<u64>,
     age: u16,
+    log: bool,
 ) -> SearchResult {
     unsafe {
         TIME_LIMIT = max_duration;
     }
     let start = Instant::now();
-    let mut iterable = MoveGen::new_legal(&board);
+    let mut iterable = MoveGen::new_legal(&board.board);
     let mut moves = sort_moves(
         &mut iterable,
-        board,
+        &board.board,
         ChessMove::default(),
         &tt.default_killers,
     );
@@ -300,40 +295,31 @@ pub fn start_search(
         return result;
     }
     for i in 2..=max_depth {
+        unsafe {
+            TT_HITS = 0;
+            NODES = 0;
+            PAWN_TT_HITS = 0;
+        }
         let res = search(board, &mut moves, i, &start, tt, draws, age);
         result = res;
-        // println!(
-        //     "info depth {} bestmove {} ({})",
-        //     i,
-        //     result.best_move.to_string(),
-        //     result.eval
-        // );
+        if log {
+            unsafe {
+                println!(
+                    "info depth {} bestmove {} ({}) tt_hits: {} pawn_tt_hits: {} nodes {}, {:?}",
+                    i,
+                    result.best_move.to_string(),
+                    result.eval,
+                    TT_HITS,
+                    PAWN_TT_HITS,
+                    NODES,
+                    start.elapsed()
+                );
+            }
+        }
         if start.elapsed() >= max_duration {
             break;
         }
     }
     result.duration = start.elapsed();
     return result;
-}
-pub fn search_at_fixed_depth(board: &Board, depth: u8) -> SearchResult {
-    unsafe {
-        TIME_LIMIT = Duration::MAX;
-    }
-    let mut iterable = MoveGen::new_legal(&board);
-    let mut tt = TranspositionTable::init();
-    let mut moves = sort_moves(
-        &mut iterable,
-        board,
-        ChessMove::default(),
-        &tt.default_killers,
-    );
-    return search(
-        board,
-        &mut moves,
-        depth,
-        &Instant::now(),
-        &mut tt,
-        &vec![],
-        0,
-    );
 }

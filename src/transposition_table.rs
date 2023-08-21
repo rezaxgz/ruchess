@@ -1,70 +1,70 @@
-use chess::{Board, ChessMove};
+use chess::ChessMove;
 
-const NUM_OF_POSITIONS: usize = 0x400000;
+use crate::board::Position;
+
+const NUM_OF_POSITIONS: usize = 0x100000;
+const NUM_OF_PAWNS: usize = 0x10000;
 const KEY: u64 = NUM_OF_POSITIONS as u64 - 1;
+const PAWN_KEY: u64 = NUM_OF_PAWNS as u64 - 1;
 const KILLERS_PER_PLY: usize = 3;
 const KILLER_PLIES: usize = 20;
 pub type Killers = [ChessMove; KILLERS_PER_PLY];
-// const NUM_OF_PAWNENTRIES: usize = 8192;
-// const PAWN_KEY: u64 = NUM_OF_PAWNENTRIES as u64 - 1;
-#[derive(PartialEq)]
+
+#[derive(PartialEq, Default, Clone, Copy)]
 pub enum EntryType {
+    #[default]
+    None,
     Exact,
     LowerBound,
     UpperBound,
 }
+#[derive(Clone, Copy, Default)]
 pub struct PositionEntry {
     pub key: u64,
     pub eval: i16,
     pub entry_type: EntryType,
     pub depth: u8,
-    ply: u8,
     pub best_move: ChessMove,
-    age: u16,
 }
-// pub struct PawnEntry {
-//     pub key: u64,
-//     pub eval: i16,
-//     pub closed: u8,
-//     pub semi_open_w: u8,
-//     pub semi_open_b: u8,
-//     pub open: u8,
-//     pub wpassers: u64,
-//     pub bpassers: u64,
-// }
+#[derive(Clone, Copy, Default)]
+pub struct PawnEntry {
+    pub hash: u64,
+    pub w_filesets: u8,
+    pub b_filesets: u8,
+    pub w_pst: (i16, i16),
+    pub b_pst: (i16, i16),
+    // pub unhealthy_pawns_count: (u8, u8),
+    pub eval: i16,
+}
 pub struct TranspositionTable {
     table: Vec<PositionEntry>,
+    pawn_table: Vec<PawnEntry>,
     killers: [Killers; KILLER_PLIES],
     pub default_killers: Killers,
-    // pawns: Vec<PawnEntry>,
 }
 impl TranspositionTable {
     #[inline]
     pub fn init() -> TranspositionTable {
         let mut x = TranspositionTable {
             table: Vec::<PositionEntry>::with_capacity(NUM_OF_POSITIONS),
+            pawn_table: Vec::<PawnEntry>::with_capacity(NUM_OF_PAWNS),
             killers: [[ChessMove::default(); KILLERS_PER_PLY]; KILLER_PLIES],
             default_killers: [ChessMove::default(); KILLERS_PER_PLY],
         };
-        for i in 0..NUM_OF_POSITIONS {
-            x.table.push(PositionEntry {
-                key: i as u64 + 1,
-                eval: 0,
-                entry_type: EntryType::Exact,
-                depth: 0,
-                ply: 0,
-                best_move: ChessMove::default(),
-                age: 0,
-            });
+        for _i in 0..NUM_OF_POSITIONS {
+            x.table.push(PositionEntry::default());
+        }
+        for _i in 0..NUM_OF_PAWNS {
+            x.pawn_table.push(PawnEntry::default());
         }
         return x;
     }
-    pub fn look_up_pos(&self, key: u64) -> Option<&PositionEntry> {
-        let res = self.table.get((key & KEY) as usize);
-        if res.unwrap().key != key {
+    pub fn look_up_pos(&self, key: u64) -> Option<PositionEntry> {
+        let res = self.table[(key & KEY) as usize];
+        if res.entry_type == EntryType::None || res.key != key {
             return None;
         }
-        return res;
+        return Some(res);
     }
     pub fn set_pos(
         &mut self,
@@ -72,52 +72,50 @@ impl TranspositionTable {
         eval: i16,
         entry_type: EntryType,
         depth: u8,
-        ply: u8,
         best_move: ChessMove,
-        age: u16,
     ) {
-        let prev_entry = self.table.get((key & KEY) as usize).unwrap();
-        if prev_entry.key == (key & KEY) + 1 {
-            self.table[(key & KEY) as usize] = PositionEntry {
-                key,
-                eval,
-                entry_type,
-                depth,
-                ply,
-                best_move,
-                age,
-            };
-            return;
+        self.table[(key & KEY) as usize] = PositionEntry {
+            key,
+            eval,
+            entry_type,
+            depth,
+            best_move,
+        };
+        return;
+    }
+    pub fn look_up_pawn_structure(&self, key: u64) -> Option<PawnEntry> {
+        let res = self.pawn_table[(key & PAWN_KEY) as usize];
+        if res.hash == key {
+            return Some(res);
         }
-        let value = (depth * ply) as u16 + age;
-        let prev_value = (prev_entry.depth * prev_entry.ply) as u16 + prev_entry.age;
-        if value >= prev_value {
-            self.table[(key & KEY) as usize] = PositionEntry {
-                key,
-                eval,
-                entry_type,
-                depth,
-                ply,
-                best_move,
-                age,
-            };
-        }
+        return None;
+    }
+    pub fn set_pawn_struct(
+        &mut self,
+        hash: u64,
+        w_filesets: u8,
+        b_filesets: u8,
+        w_pst: (i16, i16),
+        b_pst: (i16, i16),
+        eval: i16,
+    ) {
+        self.pawn_table[(hash & PAWN_KEY) as usize] = PawnEntry {
+            hash,
+            w_filesets,
+            b_filesets,
+            w_pst,
+            b_pst,
+            eval,
+        };
     }
     pub fn clear(&mut self) {
+        //pawn table isn't cleared because of low collision probability
         for i in 0..NUM_OF_POSITIONS {
-            self.table[i] = PositionEntry {
-                key: i as u64 + 1,
-                eval: 0,
-                entry_type: EntryType::Exact,
-                depth: 0,
-                ply: 0,
-                best_move: ChessMove::default(),
-                age: 0,
-            };
+            self.table[i] = PositionEntry::default();
         }
         self.killers = [[ChessMove::default(); KILLERS_PER_PLY]; KILLER_PLIES];
     }
-    pub fn get_pv(&self, board: &Board) -> Vec<ChessMove> {
+    pub fn get_pv(&self, board: &Position) -> Vec<ChessMove> {
         let mut pv = Vec::<ChessMove>::new();
         let mut hash = board.get_hash();
         let mut b = *board;

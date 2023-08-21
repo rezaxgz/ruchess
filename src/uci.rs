@@ -1,11 +1,9 @@
+use crate::board::Position;
 use crate::{
-    board_util::print_board,
-    book::init_book_full,
-    perft::go_perft,
-    search::{search_at_fixed_depth, start_search},
+    board_util::print_board, book::init_book_full, perft::go_perft, search::start_search,
     transposition_table::TranspositionTable,
 };
-use chess::{Board, ChessMove, Color};
+use chess::{ChessMove, Color};
 use std::time::Instant;
 use std::{str::FromStr, time::Duration};
 const AUTHOR: &str = "Reza";
@@ -32,10 +30,11 @@ fn get_possible_drawns(table: &Vec<(u64, u8)>) -> Vec<u64> {
         .collect();
 }
 pub fn uci() {
+    let mut log = false;
     let mut prev_cmd = String::new();
     let scanner = std::io::stdin();
     let mut line = String::new();
-    let mut board = Board::default();
+    let mut board = Position::default();
     let mut tt = TranspositionTable::init();
     let mut book = init_book_full();
     let mut repetition_table: Vec<(u64, u8)> = Vec::new();
@@ -55,13 +54,14 @@ pub fn uci() {
             }
             "isready" => println!("readyok"),
             "ucinewgame" => {
-                board = Board::default();
+                board = Position::default();
                 tt.clear();
                 book.reset();
                 repetition_table.clear();
             }
             "quit" => std::process::exit(0),
-            "print" => print_board(&board),
+            "log" => log = true,
+            "print" => print_board(&board.board),
             "pv" => println!(
                 "{:?}",
                 tt.get_pv(&board)
@@ -70,10 +70,7 @@ pub fn uci() {
                     .collect::<Vec<String>>()
             ),
             a if a.starts_with("position") => {
-                if prev_cmd.contains("moves")
-                    && prev_cmd.len() > 0
-                    && string.starts_with(&prev_cmd.trim())
-                {
+                if prev_cmd.contains("moves") && string.starts_with(&prev_cmd.trim()) {
                     let move_list = string[(prev_cmd.trim().len())..string.len()].trim();
                     let i: usize = string.find("moves").unwrap();
                     let all_move_list = string[(i + 5)..string.len()].trim();
@@ -96,11 +93,11 @@ pub fn uci() {
                     if string.starts_with("position fen") {
                         use_book = false;
                         let fen = string[13..string.len()].to_owned();
-                        board = Board::from_str(&fen).expect("Valid FEN");
+                        board = Position::new(&fen);
                         halfmoves = 0;
                     }
                     if string.contains("startpos") {
-                        board = Board::default();
+                        board = Position::default();
                         halfmoves = 0;
                     }
                     if string.contains("moves") {
@@ -138,7 +135,7 @@ pub fn uci() {
                     let depth = args[i].parse::<usize>();
                     if depth.is_ok() {
                         let start = Instant::now();
-                        let res = go_perft(&board, depth.unwrap());
+                        let res = go_perft(&board.board, depth.unwrap());
                         let duration = start.elapsed();
                         println!("{} in {:?}", res, duration,);
                     } else {
@@ -172,22 +169,23 @@ pub fn uci() {
                     }
                     let res = start_search(
                         &board,
-                        20,
+                        50,
                         allocated_time,
                         &mut tt,
                         &get_possible_drawns(&repetition_table),
                         halfmoves,
+                        log,
                     );
                     println!("bestmove {}", res.best_move.to_string());
                 }
             }
-            a if a.starts_with("search") => {
-                let res = search_at_fixed_depth(&board, 4);
-                println!(
-                    "bestmove {}: time {:?}",
-                    res.best_move.to_string(),
-                    res.duration
-                );
+            a if a.starts_with("setoption") => {
+                let name = args[args.iter().position(|r| *r == "name").unwrap() + 1];
+                let value = args[args.iter().position(|r| *r == "value").unwrap() + 1];
+                match name {
+                    "log" => log = value == "true",
+                    _ => {}
+                }
             }
             _ => {}
         }
