@@ -11,7 +11,6 @@ use chess::{
     Piece::Rook,
 };
 pub static mut PAWN_TT_HITS: u32 = 0;
-const LAZY_EXIT_MARGIN: i16 = 300;
 const PAWN_VALUE: u32 = 100;
 const KNIGHT_VALUE: u32 = 310;
 const BISHOP_VALUE: u32 = 320;
@@ -45,7 +44,7 @@ fn get_material(board: &Position, color: &BitBoard) -> (f32, i16) {
         (material + ((board.pieces(Pawn) & color).popcnt() * PAWN_VALUE)) as i16,
     );
 }
-pub fn evaluate(board: &Position, tt: &mut TranspositionTable, alpha: i16, beta: i16) -> i16 {
+pub fn evaluate(board: &Position, tt: &mut TranspositionTable) -> i16 {
     let white_combined = board.color_combined(White);
     let black_combined = board.color_combined(Black);
 
@@ -91,15 +90,6 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable, alpha: i16, beta:
         white_endgame,
     );
 
-    //lazy exit
-    let mut eval = white_material - black_material + mop_eval + piece_scores;
-    if eval >= beta + LAZY_EXIT_MARGIN || eval + LAZY_EXIT_MARGIN < alpha {
-        if board.side_to_move() == White {
-            return eval;
-        }
-        return -eval;
-    }
-
     let (pawn_eval, wp_fileset, bp_fileset) = evaluate_pawns(
         tt,
         board.get_pawn_hash(),
@@ -118,7 +108,12 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable, alpha: i16, beta:
     let bishop_eval = evaluate_bishop_pair((board.pieces(Bishop) & white_combined).0)
         - evaluate_bishop_pair((board.pieces(Bishop) & black_combined).0);
 
-    eval += pawn_eval + bishop_eval + rooks_eval;
+    let eval = white_material - black_material
+        + mop_eval
+        + piece_scores
+        + pawn_eval
+        + bishop_eval
+        + rooks_eval;
     // + king_eval;
     if board.side_to_move() == White {
         return eval;

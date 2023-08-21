@@ -26,7 +26,7 @@ fn quiesce(board: &Position, alpha: i16, beta: i16, tt: &mut TranspositionTable)
     unsafe {
         NODES += 1;
     }
-    let stand_pat = evaluate(board, tt, alpha, beta);
+    let stand_pat = evaluate(board, tt);
     if stand_pat >= beta {
         return beta;
     }
