@@ -63,6 +63,7 @@ fn alpha_beta(
         if init.elapsed() >= TIME_LIMIT {
             return SEARCH_EXIT_KEY;
         }
+        NODES += 1;
     }
     let status = board.status();
     if status == BoardStatus::Checkmate {
@@ -301,7 +302,28 @@ pub fn start_search(
             PAWN_TT_HITS = 0;
         }
         let res = search(board, &mut moves, i, &start, tt, draws, age);
+        let old_alpha = result.eval;
         result = res;
+        if start.elapsed() >= max_duration {
+            if result.eval == ALPHA {
+                result.eval = old_alpha;
+            }
+            if log {
+                unsafe {
+                    println!(
+                    "info depth {} bestmove {} ({}) tt_hits: {:?} pawn_tt_hits: {:?} nodes {:?}, {:?}",
+                    i,
+                    result.best_move.to_string(),
+                    result.eval,
+                    TT_HITS,
+                    PAWN_TT_HITS,
+                    NODES,
+                    start.elapsed()
+                );
+                }
+            }
+            break;
+        }
         if log {
             unsafe {
                 println!(
@@ -315,9 +337,6 @@ pub fn start_search(
                     start.elapsed()
                 );
             }
-        }
-        if start.elapsed() >= max_duration {
-            break;
         }
     }
     result.duration = start.elapsed();

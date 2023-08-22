@@ -1,13 +1,19 @@
 use crate::board::Position;
 use crate::{
-    board_util::print_board, book::init_book_full, perft::go_perft, search::start_search,
-    transposition_table::TranspositionTable,
+    board_util::print_board,
+    book::init_book_full,
+    perft::go_perft,
+    search::start_search,
+    transposition_table::{
+        PawnEntry, PositionEntry, TranspositionTable, NUM_OF_PAWNS, NUM_OF_POSITIONS,
+    },
 };
 use chess::{ChessMove, Color};
 use std::time::Instant;
 use std::{str::FromStr, time::Duration};
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const AUTHOR: &str = "Reza";
-const ENGINENAME: &str = "ruchess";
+const ENGINENAME: &str = "Ruchess";
 fn allocate_time(my_time: u32) -> Duration {
     let time = (my_time / 30).min(15000);
     let dur = Duration::new(time as u64 / 1000, (time % 1000) * 1000000);
@@ -48,8 +54,18 @@ pub fn uci() {
         let args: Vec<&str> = string.split(" ").collect();
         match string {
             "uci" => {
-                println!("id name {}", ENGINENAME);
+                println!("id name {} v{}", ENGINENAME, VERSION);
                 println!("id author {}", AUTHOR);
+                println!(
+                    "info {} mb hash_table {} entries",
+                    (std::mem::size_of::<PositionEntry>() * NUM_OF_POSITIONS) as f32 / 1048576.0,
+                    NUM_OF_POSITIONS
+                );
+                println!(
+                    "info {} mb pawn_hash_table {} entries",
+                    (std::mem::size_of::<PawnEntry>() * NUM_OF_PAWNS) as f32 / 1048576.0,
+                    NUM_OF_PAWNS
+                );
                 println!("uciok");
             }
             "isready" => println!("readyok"),

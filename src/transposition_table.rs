@@ -2,8 +2,8 @@ use chess::ChessMove;
 
 use crate::board::Position;
 
-const NUM_OF_POSITIONS: usize = 0x100000;
-const NUM_OF_PAWNS: usize = 0x10000;
+pub const NUM_OF_POSITIONS: usize = 0x400000;
+pub const NUM_OF_PAWNS: usize = 0x40000;
 const KEY: u64 = NUM_OF_POSITIONS as u64 - 1;
 const PAWN_KEY: u64 = NUM_OF_PAWNS as u64 - 1;
 const KILLERS_PER_PLY: usize = 3;
