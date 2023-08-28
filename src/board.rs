@@ -60,8 +60,8 @@ impl Position {
     pub fn get_pawn_hash(&self) -> u64 {
         return self.pawn_hash;
     }
-    pub fn pieces(&self, piece: Piece) -> &BitBoard {
-        return self.board.pieces(piece);
+    pub fn pieces(&self, piece: Piece) -> u64 {
+        return self.board.pieces(piece).0;
     }
     pub fn checkers(&self) -> &BitBoard {
         return self.board.checkers();

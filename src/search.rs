@@ -14,6 +14,7 @@ const BETA: i16 = i16::MAX;
 static mut TIME_LIMIT: Duration = Duration::new(0, 0);
 static mut NODES: u32 = 0;
 static mut TT_HITS: u32 = 0;
+static mut BETA_CUTOFFS: u32 = 0;
 pub struct SearchResult {
     pub eval: i16,
     pub best_move: ChessMove,
@@ -28,6 +29,9 @@ fn quiesce(board: &Position, alpha: i16, beta: i16, tt: &mut TranspositionTable)
     }
     let stand_pat = evaluate(board, tt);
     if stand_pat >= beta {
+        unsafe {
+            BETA_CUTOFFS += 1;
+        }
         return beta;
     }
     if alpha < stand_pat {
@@ -57,7 +61,6 @@ fn alpha_beta(
     beta: i16,
     init: &Instant,
     tt: &mut TranspositionTable,
-    age: u16,
 ) -> i16 {
     unsafe {
         if init.elapsed() >= TIME_LIMIT {
@@ -107,12 +110,12 @@ fn alpha_beta(
         tt_move,
         tt.get_killers(ply_from_root as usize),
     );
-    let mut best_move = moves[0];
+    let mut best_move = moves[0].0;
     let mut alpha = alpha;
     let mut tt_type = EntryType::UpperBound;
     // let mut best_move = ChessMove::default();
     for i in 0..moves.len() {
-        let mv = moves[i];
+        let mv = moves[i].0;
         let piece = board.piece_on(mv.get_source()).unwrap();
         let is_capture = board.piece_on(mv.get_dest()).is_some();
         let new_board = board.make_move_new(mv);
@@ -145,7 +148,6 @@ fn alpha_beta(
                 -alpha,
                 init,
                 tt,
-                age,
             );
             needs_full_search = score > alpha;
         }
@@ -159,13 +161,15 @@ fn alpha_beta(
                 -alpha,
                 init,
                 tt,
-                age,
             );
         }
         if score == NEG_SEARCH_EXIT_KEY {
             return SEARCH_EXIT_KEY;
         }
         if score >= beta {
+            unsafe {
+                BETA_CUTOFFS += 1;
+            }
             tt.store_killer(ply_from_root as usize, mv);
             tt.set_pos(key, score, EntryType::LowerBound, depth, mv);
             return beta;
@@ -181,19 +185,18 @@ fn alpha_beta(
 }
 fn search(
     board: &Position,
-    moves: &mut Vec<ChessMove>,
+    moves: &mut Vec<(ChessMove, i16)>,
+    mut alpha: i16,
+    _beta: i16,
     max_depth: u8,
     init: &Instant,
     tt: &mut TranspositionTable,
     draws: &Vec<u64>,
-    age: u16,
 ) -> SearchResult {
     let start = Instant::now();
-    let mut best_move = moves[0];
-    let mut alpha = ALPHA;
-    let mut ext_moves = Vec::<(ChessMove, i16)>::with_capacity(moves.len());
+    let mut best_move = moves[0].0;
     for i in 0..moves.len() {
-        let mv = moves[i];
+        let (mv, _prev) = moves[i];
         let piece = board.piece_on(mv.get_source()).unwrap();
         let new_board = board.make_move_new(mv);
         let mut score = 0;
@@ -219,7 +222,6 @@ fn search(
                     -alpha,
                     init,
                     tt,
-                    age,
                 );
                 needs_full_search = score > alpha;
             }
@@ -233,7 +235,6 @@ fn search(
                     -alpha,
                     init,
                     tt,
-                    age,
                 );
             }
         }
@@ -246,17 +247,13 @@ fn search(
                 duration: start.elapsed(),
             };
         }
-        ext_moves.push((mv, score));
+        moves[i] = (mv, score);
         if score > alpha {
             alpha = score;
             best_move = mv;
         }
     }
-    ext_moves.sort_by(|b, a| a.1.cmp(&b.1));
-    moves.clear();
-    for i in ext_moves {
-        moves.push(i.0);
-    }
+    moves.sort_by(|b, a| a.1.cmp(&b.1));
     tt.set_pos(
         board.get_hash(),
         alpha,
@@ -277,7 +274,6 @@ pub fn start_search(
     max_duration: Duration,
     tt: &mut TranspositionTable,
     draws: &Vec<u64>,
-    age: u16,
     log: bool,
 ) -> SearchResult {
     unsafe {
@@ -291,7 +287,9 @@ pub fn start_search(
         ChessMove::default(),
         &tt.default_killers,
     );
-    let mut result = search(board, &mut moves, 1, &start, tt, draws, age);
+    let alpha = ALPHA;
+    let beta = BETA;
+    let mut result = search(board, &mut moves, alpha, beta, 1, &start, tt, draws);
     if moves.len() == 1 {
         return result;
     }
@@ -300,8 +298,9 @@ pub fn start_search(
             TT_HITS = 0;
             NODES = 0;
             PAWN_TT_HITS = 0;
+            BETA_CUTOFFS = 0;
         }
-        let res = search(board, &mut moves, i, &start, tt, draws, age);
+        let res = search(board, &mut moves, alpha, beta, i, &start, tt, draws);
         let old_alpha = result.eval;
         result = res;
         if start.elapsed() >= max_duration {
@@ -311,15 +310,16 @@ pub fn start_search(
             if log {
                 unsafe {
                     println!(
-                    "info depth {} bestmove {} ({}) tt_hits: {:?} pawn_tt_hits: {:?} nodes {:?}, {:?}",
-                    i,
-                    result.best_move.to_string(),
-                    result.eval,
-                    TT_HITS,
-                    PAWN_TT_HITS,
-                    NODES,
-                    start.elapsed()
-                );
+                        "info depth {} bestmove {} ({}) tt_hits: {:?} pawn_tt_hits: {:?} cut_offs: {} nodes {:?}, {:?}",
+                        i,
+                        result.best_move.to_string(),
+                        result.eval,
+                        TT_HITS,
+                        PAWN_TT_HITS,
+                        BETA_CUTOFFS,
+                        NODES,
+                        start.elapsed()
+                    );
                 }
             }
             break;
@@ -327,12 +327,13 @@ pub fn start_search(
         if log {
             unsafe {
                 println!(
-                    "info depth {} bestmove {} ({}) tt_hits: {} pawn_tt_hits: {} nodes {}, {:?}",
+                    "info depth {} bestmove {} ({}) tt_hits: {} pawn_tt_hits: {} cut_offs: {} nodes {}, {:?}",
                     i,
                     result.best_move.to_string(),
                     result.eval,
                     TT_HITS,
                     PAWN_TT_HITS,
+                    BETA_CUTOFFS,
                     NODES,
                     start.elapsed()
                 );

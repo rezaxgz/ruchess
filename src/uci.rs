@@ -46,7 +46,6 @@ pub fn uci() {
     let mut repetition_table: Vec<(u64, u8)> = Vec::new();
     let mut use_book = true;
     let mut book_move = String::from("");
-    let mut halfmoves: u16 = 0;
     loop {
         line.clear();
         scanner.read_line(&mut line).unwrap();
@@ -100,7 +99,6 @@ pub fn uci() {
                     for m in move_list.split(" ") {
                         board = board.make_move_new(ChessMove::from_str(m).unwrap());
                         add_repetition(&mut repetition_table, board.get_hash());
-                        halfmoves += 1;
                     }
                 } else {
                     tt.clear();
@@ -110,11 +108,9 @@ pub fn uci() {
                         use_book = false;
                         let fen = string[13..string.len()].to_owned();
                         board = Position::new(&fen);
-                        halfmoves = 0;
                     }
                     if string.contains("startpos") {
                         board = Position::default();
-                        halfmoves = 0;
                     }
                     if string.contains("moves") {
                         let i: usize = string.find("moves").unwrap();
@@ -122,7 +118,6 @@ pub fn uci() {
                         for m in move_list.split(" ") {
                             board = board.make_move_new(ChessMove::from_str(m).unwrap());
                             add_repetition(&mut repetition_table, board.get_hash());
-                            halfmoves += 1;
                         }
                         let book_res = book.check(move_list);
                         match book_res {
@@ -189,7 +184,6 @@ pub fn uci() {
                         allocated_time,
                         &mut tt,
                         &get_possible_drawns(&repetition_table),
-                        halfmoves,
                         log,
                     );
                     println!("bestmove {}", res.best_move.to_string());

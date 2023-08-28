@@ -1,7 +1,7 @@
 use chess::{Color, Piece, Square};
 
 static mut DISTANCE_FROM_CENTER: [u8; 64] = [0; 64];
-static mut SQUARE_DISTANCE: [[u8; 64]; 64] = [[0; 64]; 64];
+static mut SQUARE_DISTANCE: [[i16; 64]; 64] = [[0; 64]; 64];
 static mut ORTHOGONAL_DISTANCE: [[u8; 64]; 64] = [[0; 64]; 64];
 #[rustfmt::skip]
 pub const PIECE_SQUARE_TABLES: [[[i16; 64]; 6]; 2] = [
@@ -337,6 +337,8 @@ pub const FILES: [u64; 8] = [
 ];
 pub const DARK_SQUARES: u64 = 0xAA55AA55AA55AA55;
 pub const LIGHT_SQUARES: u64 = 0x55AA55AA55AA55AA;
+pub const SEVENTH_RANK: u64 = RANKS[6];
+pub const SECOND_RANK: u64 = RANKS[1];
 pub fn get_spst_value(color: Color, piece: Piece, square: Square) -> i8 {
     if piece == Piece::King || piece == Piece::Pawn {
         return 0;
@@ -394,7 +396,7 @@ pub fn init() {
                     ORTHOGONAL_DISTANCE[sq][square_b as usize] =
                         (file_distance + rank_distance) as u8;
                     SQUARE_DISTANCE[sq][square_b as usize] =
-                        std::cmp::max(file_distance, rank_distance) as u8;
+                        std::cmp::max(file_distance, rank_distance) as i16;
                 }
             }
         }

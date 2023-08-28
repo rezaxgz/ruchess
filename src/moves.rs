@@ -57,7 +57,7 @@ pub fn sort_moves(
     board: &Board,
     tt_move: ChessMove,
     killer_moves: &Killers,
-) -> Vec<ChessMove> {
+) -> Vec<(ChessMove, i16)> {
     let pawns = board.pieces(Piece::Pawn);
     let controled = if board.side_to_move() == Color::White {
         ((pawns & board.color_combined(Color::Black)).0 >> 9 & NOT_FILE_H_BB)
@@ -66,7 +66,7 @@ pub fn sort_moves(
         ((pawns & board.color_combined(Color::White)).0 << 7 & NOT_FILE_H_BB)
             | ((pawns & board.color_combined(Color::White)).0 << 9 & NOT_FILE_A_BB)
     };
-    let mut vector = Vec::<(ChessMove, i8)>::with_capacity(iterable.len());
+    let mut vector = Vec::<(ChessMove, i16)>::with_capacity(iterable.len());
     for mv in iterable {
         vector.push((
             mv,
@@ -78,11 +78,11 @@ pub fn sort_moves(
                 board.side_to_move(),
                 mv == tt_move,
                 killer_moves.contains(&mv),
-            ),
+            ) as i16,
         ));
     }
     vector.sort_by(|b, a| a.1.cmp(&b.1));
-    return vector.iter().map(|t| t.0).collect();
+    return vector;
 }
 fn capture_value(piece: Piece, captured: Piece, promo: Option<Piece>, is_controled: bool) -> i8 {
     let mut value = MVV_LVA[captured.to_index()][piece.to_index()];
