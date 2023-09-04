@@ -1,13 +1,13 @@
 use crate::board::Position;
 use crate::data::{
     calc_king_pst, get_adjacent_files, get_distance_from_center, get_fileset_bb, get_front_spans,
-    get_orthogonal_distance, DARK_SQUARES, FILES, LIGHT_SQUARES, PAWN_SQUARE_TABLES,
-    PIECE_SQUARE_TABLES, SECOND_RANK, SEVENTH_RANK,
+    get_orthogonal_distance, ADJACENT_FILESETS, DARK_SQUARES, FILES, LIGHT_SQUARES,
+    PAWN_SQUARE_TABLES, PIECE_SQUARE_TABLES, SECOND_RANK, SEVENTH_RANK,
 };
 use crate::transposition_table::TranspositionTable;
 use chess::{
-    Color::Black, Color::White, Piece::Bishop, Piece::Knight, Piece::Pawn, Piece::Queen,
-    Piece::Rook,
+    CastleRights, Color::Black, Color::White, Piece::Bishop, Piece::Knight, Piece::Pawn,
+    Piece::Queen, Piece::Rook,
 };
 pub static mut PAWN_TT_HITS: u32 = 0;
 const PAWN_VALUE: u32 = 100;
@@ -21,6 +21,9 @@ const PASSED_PAWN_VALUES: [i16; 7] = [0, 90, 60, 40, 25, 15, 15];
 const BISHOP_PAIR_VALUE: i16 = 50;
 const UNHEALTHY_PAWN_PENALTY: i16 = 10;
 const OPEN_UNHEALTHY_PAWN_PENALTY: i16 = 10;
+const KING_SIDE_CASTLE_FILESET: u8 = ADJACENT_FILESETS[6];
+const QUEEN_SIDE_CASTLE_FILESET: u8 = ADJACENT_FILESETS[2];
+const PAWN_STORM_PENALTY: [i16; 8] = [0, 0, -60, -30, -10, 0, 0, 0];
 fn get_value<T>(m: T, e: T, endgame: f32) -> T {
     if endgame == 0.0 {
         return m;
@@ -136,6 +139,15 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable) -> i16 {
     } else {
         0
     };
+    let king_eval = if black_endgame != 0.0 && (board.pieces(Queen) & black_combined) != 0 {
+        evaluate_king_safety(wp, bp, wk, 0, board.castle_rights(White))
+    } else {
+        0
+    } - if white_endgame != 0.0 && (board.pieces(Queen) & white_combined) != 0 {
+        evaluate_king_safety(bp, wp, bk, 1, board.castle_rights(Black))
+    } else {
+        0
+    };
     let tempo_bounus = if board.side_to_move() == White {
         get_value(20, 10, black_endgame)
     } else {
@@ -150,8 +162,8 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable) -> i16 {
         + rooks_eval
         + queens_eval
         + seventh_rank_value
-        + tempo_bounus;
-    // + king_eval;
+        + tempo_bounus
+        + king_eval;
     if board.side_to_move() == White {
         return eval;
     }
@@ -297,4 +309,79 @@ fn evaluate_queens(mut queens: u64, their_king: usize) -> i16 {
 fn seventh_rank_bounus(queens: u64, rooks: u64, endgame: f32) -> i16 {
     return (rooks.count_ones() * get_value(10, 30, endgame)
         + queens.count_ones() * get_value(10, 20, endgame)) as i16;
+}
+fn evaluate_pawn_shield(pawns: u64, king: usize, color: usize) -> i16 {
+    let mut score = 0;
+    let mut fileset = ADJACENT_FILESETS[king & 7];
+    let king_file = king >> 3;
+    while fileset != 0 {
+        let file = fileset.trailing_zeros() as usize;
+        let file_bb = FILES[file] & pawns;
+        fileset &= fileset - 1;
+        let penalty = if file_bb == 0 {
+            36
+        } else {
+            let pawn = if color == 0 {
+                file_bb.trailing_zeros()
+            } else {
+                63 - file_bb.leading_zeros()
+            };
+            let distance_to_8 = if color == 0 {
+                7 - (pawn >> 3)
+            } else {
+                pawn >> 3
+            } as i16;
+            36 - (distance_to_8 * distance_to_8)
+        };
+        if file == king_file {
+            score -= penalty << 1;
+        } else {
+            score -= penalty;
+        }
+    }
+    return score;
+}
+fn evaluate_pawn_storm(their_pawns: u64, mut fileset: u8, color: usize) -> i16 {
+    let mut score = 0;
+    while fileset != 0 {
+        let file = fileset.trailing_zeros() as usize;
+        let bb = FILES[file] & their_pawns;
+        fileset &= fileset - 1;
+        if bb != 0 {
+            let pawn = if color == 0 {
+                bb.trailing_zeros()
+            } else {
+                63 - bb.leading_zeros()
+            };
+            score += PAWN_STORM_PENALTY[if color == 0 {
+                (pawn >> 3) as usize
+            } else {
+                (7 - (pawn >> 3)) as usize
+            }];
+        }
+    }
+    return score;
+}
+fn evaluate_king_safety(
+    my_pawns: u64,
+    their_pawns: u64,
+    king: usize,
+    color: usize,
+    castling_rights: CastleRights,
+) -> i16 {
+    let mut storm_value = evaluate_pawn_storm(their_pawns, ADJACENT_FILESETS[king & 7], color);
+    if castling_rights != CastleRights::NoRights {
+        let value = if castling_rights == CastleRights::KingSide {
+            evaluate_pawn_storm(their_pawns, KING_SIDE_CASTLE_FILESET, color)
+        } else if castling_rights == CastleRights::QueenSide {
+            evaluate_pawn_storm(their_pawns, QUEEN_SIDE_CASTLE_FILESET, color)
+        } else {
+            std::cmp::max(
+                evaluate_pawn_storm(their_pawns, KING_SIDE_CASTLE_FILESET, color),
+                evaluate_pawn_storm(their_pawns, QUEEN_SIDE_CASTLE_FILESET, color),
+            )
+        };
+        storm_value = (storm_value + value) / 2;
+    }
+    return evaluate_pawn_shield(my_pawns, king, color) + storm_value;
 }

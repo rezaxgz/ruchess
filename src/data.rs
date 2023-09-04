@@ -315,6 +315,9 @@ static mut FRONT_SPANS: [[u64; 64]; 2] = [[0; 64]; 2];
 static mut ADJACENT_FILES: [u64; 8] = [0; 8];
 static mut SUPPORTING_PAWNS: [u64; 64] = [0; 64];
 static mut FILESETS: [u64; 256] = [0; 256];
+pub const ADJACENT_FILESETS: [u8; 8] = [
+    0b11, 0b111, 0b1110, 0b11100, 0b111000, 0b1110000, 0b11100000, 0b11000000,
+];
 pub const RANKS: [u64; 8] = [
     0xFF,
     0xFF00,

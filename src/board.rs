@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use chess::{BitBoard, Board, BoardStatus, ChessMove, Color, Piece, Square};
+use chess::{BitBoard, Board, BoardStatus, CastleRights, ChessMove, Color, Piece, Square};
 
 use crate::data::{get_pst_value, PAWN_ZOBRIST};
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -80,6 +80,9 @@ impl Position {
     }
     pub fn status(&self) -> BoardStatus {
         return self.board.status();
+    }
+    pub fn castle_rights(&self, color: Color) -> CastleRights {
+        return self.board.castle_rights(color);
     }
     #[inline]
     pub fn new(fen: &str) -> Position {
