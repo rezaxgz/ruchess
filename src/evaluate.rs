@@ -1,10 +1,13 @@
 use crate::board::Position;
 use crate::data::{
     calc_king_pst, get_adjacent_files, get_distance_from_center, get_fileset_bb, get_front_spans,
-    get_orthogonal_distance, ADJACENT_FILESETS, DARK_SQUARES, FILES, LIGHT_SQUARES,
-    PAWN_SQUARE_TABLES, PIECE_SQUARE_TABLES, SECOND_RANK, SEVENTH_RANK,
+    get_orthogonal_distance, ADJACENT_FILESETS, DARK_SQUARES, FILES, KING_ATTACKS_BITBOARD,
+    KNIGHT_ATTACKS_BITBOARD, LIGHT_SQUARES, PAWN_SQUARE_TABLES, PIECE_SQUARE_TABLES, SECOND_RANK,
+    SEVENTH_RANK,
 };
+use crate::moves::{get_bishop_moves, get_rook_moves};
 use crate::transposition_table::TranspositionTable;
+use chess::Color;
 use chess::{
     CastleRights, Color::Black, Color::White, Piece::Bishop, Piece::Knight, Piece::Pawn,
     Piece::Queen, Piece::Rook,
@@ -140,11 +143,11 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable) -> i16 {
         0
     };
     let king_eval = if black_endgame != 0.0 && (board.pieces(Queen) & black_combined) != 0 {
-        evaluate_king_safety(wp, bp, wk, 0, board.castle_rights(White))
+        evaluate_king_safety(wp, bp, wk, 0, board)
     } else {
         0
     } - if white_endgame != 0.0 && (board.pieces(Queen) & white_combined) != 0 {
-        evaluate_king_safety(bp, wp, bk, 1, board.castle_rights(Black))
+        evaluate_king_safety(bp, wp, bk, 1, board)
     } else {
         0
     };
@@ -362,13 +365,66 @@ fn evaluate_pawn_storm(their_pawns: u64, mut fileset: u8, color: usize) -> i16 {
     }
     return score;
 }
+fn get_piece_attack_weight(num: u32) -> f32 {
+    match num {
+        0 => 0.0,
+        1 => 0.0,
+        2 => 0.5,
+        3 => 0.75,
+        4 => 0.88,
+        5 => 0.94,
+        6 => 0.97,
+        7 => 0.99,
+        _ => 1.0,
+    }
+}
+fn evaluate_piece_attacks(
+    board: &Position,
+    targets: u64,
+    knight_attacks: u64,
+    color: Color,
+) -> i16 {
+    let color_combined = board.color_combined(color).0;
+    let mut num = (board.pieces(Knight) & color_combined & knight_attacks).count_ones();
+    let mut values = num as f32;
+    let blockers = board.combined();
+    let mut bishops = board.pieces(Bishop) & color_combined;
+    while bishops != 0 {
+        if get_bishop_moves(bishops.trailing_zeros() as usize, blockers) & targets != 0 {
+            num += 1;
+            values += 1.0;
+        }
+        bishops &= bishops - 1;
+    }
+    let mut rooks = board.pieces(Rook) & color_combined;
+    while rooks != 0 {
+        if get_rook_moves(rooks.trailing_zeros() as usize, blockers) & targets != 0 {
+            num += 1;
+            values += 2.0;
+        }
+        rooks &= rooks - 1;
+    }
+    let mut queens = board.pieces(Queen) & color_combined;
+    while queens != 0 {
+        let q = queens.trailing_zeros() as usize;
+        if (get_rook_moves(q, blockers) & targets != 0)
+            || (get_bishop_moves(q, blockers) & targets != 0)
+        {
+            num += 1;
+            values += 4.0;
+        }
+        queens &= queens - 1;
+    }
+    return (20.0 * values * get_piece_attack_weight(num)) as i16;
+}
 fn evaluate_king_safety(
     my_pawns: u64,
     their_pawns: u64,
     king: usize,
     color: usize,
-    castling_rights: CastleRights,
+    board: &Position,
 ) -> i16 {
+    let castling_rights = board.castle_rights(if color == 0 { White } else { Black });
     let mut storm_value = evaluate_pawn_storm(their_pawns, ADJACENT_FILESETS[king & 7], color);
     if castling_rights != CastleRights::NoRights {
         let value = if castling_rights == CastleRights::KingSide {
@@ -383,5 +439,11 @@ fn evaluate_king_safety(
         };
         storm_value = (storm_value + value) / 2;
     }
-    return evaluate_pawn_shield(my_pawns, king, color) + storm_value;
+    return evaluate_pawn_shield(my_pawns, king, color) + storm_value
+        - evaluate_piece_attacks(
+            board,
+            KING_ATTACKS_BITBOARD[king],
+            KNIGHT_ATTACKS_BITBOARD[king],
+            if color == 0 { Black } else { White },
+        );
 }

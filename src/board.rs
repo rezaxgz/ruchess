@@ -81,6 +81,9 @@ impl Position {
     pub fn status(&self) -> BoardStatus {
         return self.board.status();
     }
+    pub fn combined(&self) -> u64 {
+        return self.board.combined().0;
+    }
     pub fn castle_rights(&self, color: Color) -> CastleRights {
         return self.board.castle_rights(color);
     }

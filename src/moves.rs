@@ -9,6 +9,9 @@ const MVV_LVA: [[i8; 6]; 5] = [
 ];
 const TT_MOVE_VALUE: i8 = 55;
 const KILLER_MOVE_VALUE: i8 = 55;
+const ROOK: usize = 0;
+const BISHOP: usize = 1;
+use crate::magics::{MAGIC_NUMBERS, MOVES, RAYS};
 use crate::{data::get_spst_value, transposition_table::Killers};
 use chess::{Board, ChessMove, Color, MoveGen, Piece};
 fn promotion_value(piece: Piece) -> i8 {
@@ -116,4 +119,16 @@ pub fn sort_captures(iterable: &mut MoveGen, board: &Board) -> Vec<ChessMove> {
     }
     vector.sort_by(|b, a| a.1.cmp(&b.1));
     return vector.iter().map(|t| t.0).collect();
+}
+pub fn get_rook_moves(sq: usize, blockers: u64) -> u64 {
+    let magic = MAGIC_NUMBERS[ROOK][sq];
+    return MOVES[(magic.offset as usize)
+        + ((magic.magic_number * (blockers & magic.mask)) >> magic.rightshift) as usize]
+        & RAYS[ROOK][sq];
+}
+pub fn get_bishop_moves(sq: usize, blockers: u64) -> u64 {
+    let magic = MAGIC_NUMBERS[BISHOP][sq];
+    return MOVES[(magic.offset as usize)
+        + ((magic.magic_number * (blockers & magic.mask)) >> magic.rightshift) as usize]
+        & RAYS[BISHOP][sq];
 }

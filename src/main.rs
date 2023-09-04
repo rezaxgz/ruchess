@@ -3,6 +3,7 @@ mod board_util;
 mod book;
 mod data;
 mod evaluate;
+mod magics;
 mod moves;
 mod perft;
 mod search;
