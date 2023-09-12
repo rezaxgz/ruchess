@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "ruchess"
-version = "1.2.0"
+version = "1.4.0"
 dependencies = [
  "chess",
  "rand 0.8.5",
