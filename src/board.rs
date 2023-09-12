@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use chess::{BitBoard, Board, BoardStatus, CastleRights, ChessMove, Color, Piece, Square};
+use chess::{BitBoard, Board, CastleRights, ChessMove, Color, Piece, Square};
 
 use crate::data::{get_pst_value, PAWN_ZOBRIST};
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -63,8 +63,8 @@ impl Position {
     pub fn pieces(&self, piece: Piece) -> u64 {
         return self.board.pieces(piece).0;
     }
-    pub fn checkers(&self) -> &BitBoard {
-        return self.board.checkers();
+    pub fn checkers(&self) -> u64 {
+        return self.board.checkers().0;
     }
     pub fn piece_on(&self, sq: Square) -> Option<Piece> {
         return self.board.piece_on(sq);
@@ -77,9 +77,6 @@ impl Position {
     }
     pub fn get_pst_values(&self) -> i16 {
         return self.pst_values;
-    }
-    pub fn status(&self) -> BoardStatus {
-        return self.board.status();
     }
     pub fn combined(&self) -> u64 {
         return self.board.combined().0;

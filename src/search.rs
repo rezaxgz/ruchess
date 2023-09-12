@@ -1,11 +1,12 @@
 use crate::board::Position;
 use crate::evaluate::PAWN_TT_HITS;
+use crate::moves::MoveType;
 use crate::{
     evaluate::evaluate,
     moves::{sort_captures, sort_moves},
     transposition_table::{EntryType, TranspositionTable},
 };
-use chess::{BoardStatus, ChessMove, MoveGen, Piece, Rank};
+use chess::{ChessMove, MoveGen, Piece, Rank, Square};
 use std::time::{Duration, Instant};
 const SEARCH_EXIT_KEY: i16 = std::i16::MAX;
 const NEG_SEARCH_EXIT_KEY: i16 = -SEARCH_EXIT_KEY;
@@ -20,6 +21,7 @@ pub struct SearchResult {
     pub best_move: ChessMove,
     pub depth: u8,
     pub duration: Duration,
+    pub nodes: u32,
 }
 
 fn quiesce(board: &Position, alpha: i16, beta: i16, tt: &mut TranspositionTable) -> i16 {
@@ -61,6 +63,8 @@ fn alpha_beta(
     beta: i16,
     init: &Instant,
     tt: &mut TranspositionTable,
+    prev_piece: Piece,
+    prev_sq: Square,
 ) -> i16 {
     unsafe {
         if init.elapsed() >= TIME_LIMIT {
@@ -68,14 +72,8 @@ fn alpha_beta(
         }
         NODES += 1;
     }
-    let status = board.status();
-    if status == BoardStatus::Checkmate {
-        return -10000 + (ply_from_root as i16);
-    } else if status == BoardStatus::Stalemate {
-        return 0;
-    }
     let key = board.get_hash();
-    let tt_value = tt.look_up_pos(key);
+    let tt_value = tt.look_up_pos(key, &board);
     let tt_move = if tt_value.is_some() {
         tt_value.unwrap().best_move
     } else {
@@ -103,23 +101,40 @@ fn alpha_beta(
     if depth == 0 {
         return quiesce(board, alpha, beta, tt);
     }
-    let mut iterable = MoveGen::new_legal(&board.board);
-    let moves = sort_moves(
-        &mut iterable,
-        &board.board,
-        tt_move,
-        tt.get_killers(ply_from_root as usize),
-    );
+
+    let mut moves = if tt_move != ChessMove::default() {
+        vec![(tt_move, 0, MoveType::HashMove)]
+    } else {
+        let mut iterable = MoveGen::new_legal(&board.board);
+        sort_moves(
+            &mut iterable,
+            &board.board,
+            tt_move,
+            tt.get_killers(ply_from_root as usize),
+            &tt.history[board.side_to_move().to_index()],
+            tt.counters[board.side_to_move().to_index()][prev_piece.to_index()][prev_sq.to_index()],
+        )
+    };
+    if moves.len() == 0 {
+        if board.checkers() == 0 {
+            return 0;
+        } else {
+            return -10000 + ply_from_root as i16;
+        }
+    }
     let mut best_move = moves[0].0;
+    let mut best_move_piece = board.piece_on(moves[0].0.get_source()).unwrap();
     let mut alpha = alpha;
     let mut tt_type = EntryType::UpperBound;
-    // let mut best_move = ChessMove::default();
-    for i in 0..moves.len() {
+    let mut i = 0;
+    while i < moves.len() {
         let mv = moves[i].0;
         let piece = board.piece_on(mv.get_source()).unwrap();
         let is_capture = board.piece_on(mv.get_dest()).is_some();
         let new_board = board.make_move_new(mv);
-        let is_check = board.checkers().0 != 0;
+        tt.bf_history[board.side_to_move().to_index()][piece.to_index()]
+            [mv.get_dest().to_index()] += 1;
+        let is_check = board.checkers() != 0;
         let mut extention = if is_check && extended < 6 { 1 } else { 0 };
         let rank = mv.get_dest().get_rank();
         if piece == Piece::Pawn && (rank == Rank::Second || rank == Rank::Seventh) {
@@ -148,6 +163,8 @@ fn alpha_beta(
                 -alpha,
                 init,
                 tt,
+                piece,
+                mv.get_dest(),
             );
             needs_full_search = score > alpha;
         }
@@ -161,6 +178,8 @@ fn alpha_beta(
                 -alpha,
                 init,
                 tt,
+                piece,
+                mv.get_dest(),
             );
         }
         if score == NEG_SEARCH_EXIT_KEY {
@@ -170,17 +189,41 @@ fn alpha_beta(
             unsafe {
                 BETA_CUTOFFS += 1;
             }
-            tt.store_killer(ply_from_root as usize, mv);
-            tt.set_pos(key, score, EntryType::LowerBound, depth, mv);
+            if !is_capture {
+                tt.store_killer(
+                    ply_from_root as usize,
+                    depth as i32,
+                    mv,
+                    piece,
+                    board.side_to_move().to_index(),
+                    prev_piece,
+                    prev_sq,
+                );
+            }
+            tt.set_pos(key, score, EntryType::LowerBound, depth, mv, piece);
             return beta;
         }
         if score > alpha {
             alpha = score;
             tt_type = EntryType::Exact;
             best_move = mv;
+            best_move_piece = piece;
         }
+        if moves[i].2 == MoveType::HashMove {
+            let mut iterable = MoveGen::new_legal(&board.board);
+            moves = sort_moves(
+                &mut iterable,
+                &board.board,
+                tt_move,
+                tt.get_killers(ply_from_root as usize),
+                &tt.history[board.side_to_move().to_index()],
+                tt.counters[board.side_to_move().to_index()][prev_piece.to_index()]
+                    [prev_sq.to_index()],
+            );
+        }
+        i += 1;
     }
-    tt.set_pos(key, alpha, tt_type, depth, best_move);
+    tt.set_pos(key, alpha, tt_type, depth, best_move, best_move_piece);
     return alpha;
 }
 fn search(
@@ -201,7 +244,7 @@ fn search(
         let new_board = board.make_move_new(mv);
         let mut score = 0;
         if !draws.contains(&new_board.get_hash()) {
-            let mut extention = if board.checkers().0 != 0 { 1 } else { 0 };
+            let mut extention = if board.checkers() != 0 { 1 } else { 0 };
             let rank = mv.get_dest().get_rank();
             if piece == Piece::Pawn && (rank == Rank::Second || rank == Rank::Seventh) {
                 extention += 1;
@@ -222,6 +265,8 @@ fn search(
                     -alpha,
                     init,
                     tt,
+                    piece,
+                    mv.get_dest(),
                 );
                 needs_full_search = score > alpha;
             }
@@ -235,6 +280,8 @@ fn search(
                     -alpha,
                     init,
                     tt,
+                    piece,
+                    mv.get_dest(),
                 );
             }
         }
@@ -245,6 +292,7 @@ fn search(
                 best_move,
                 depth: max_depth,
                 duration: start.elapsed(),
+                nodes: 0,
             };
         }
         moves[i] = (mv, score);
@@ -260,12 +308,14 @@ fn search(
         EntryType::Exact,
         max_depth,
         best_move,
+        board.piece_on(best_move.get_source()).unwrap(),
     );
     return SearchResult {
         eval: alpha,
         best_move,
         depth: max_depth,
         duration: start.elapsed(),
+        nodes: 0,
     };
 }
 pub fn start_search(
@@ -281,21 +331,28 @@ pub fn start_search(
     }
     let start = Instant::now();
     let mut iterable = MoveGen::new_legal(&board.board);
-    let mut moves = sort_moves(
+    let mut moves: Vec<(ChessMove, i16)> = sort_moves(
         &mut iterable,
         &board.board,
         ChessMove::default(),
         &tt.default_killers,
-    );
+        &tt.history[board.side_to_move().to_index()],
+        ChessMove::default(),
+    )
+    .iter()
+    .map(|i| (i.0, i.1 as i16))
+    .collect::<Vec<(ChessMove, i16)>>();
     let alpha = ALPHA;
     let beta = BETA;
     let mut result = search(board, &mut moves, alpha, beta, 1, &start, tt, draws);
     if moves.len() == 1 {
         return result;
     }
+    let mut sum = 0;
     for i in 2..=max_depth {
         unsafe {
             TT_HITS = 0;
+            sum += NODES;
             NODES = 0;
             PAWN_TT_HITS = 0;
             BETA_CUTOFFS = 0;
@@ -303,34 +360,13 @@ pub fn start_search(
         let res = search(board, &mut moves, alpha, beta, i, &start, tt, draws);
         let old_alpha = result.eval;
         result = res;
-        if start.elapsed() >= max_duration {
-            if result.eval == ALPHA {
-                result.eval = old_alpha;
-            }
-            if log {
-                unsafe {
-                    println!(
-                        "info depth {} bestmove {} ({}) tt_hits: {:?} pawn_tt_hits: {:?} cut_offs: {} nodes {:?}, {:?}",
-                        i,
-                        result.best_move.to_string(),
-                        result.eval,
-                        TT_HITS,
-                        PAWN_TT_HITS,
-                        BETA_CUTOFFS,
-                        NODES,
-                        start.elapsed()
-                    );
-                }
-            }
-            break;
-        }
         if log {
             unsafe {
                 println!(
                     "info depth {} bestmove {} ({}) tt_hits: {} pawn_tt_hits: {} cut_offs: {} nodes {}, {:?}",
                     i,
                     result.best_move.to_string(),
-                    result.eval,
+                    if result.eval == ALPHA{old_alpha}else{result.eval},
                     TT_HITS,
                     PAWN_TT_HITS,
                     BETA_CUTOFFS,
@@ -339,7 +375,14 @@ pub fn start_search(
                 );
             }
         }
+        if start.elapsed() >= max_duration {
+            if result.eval == ALPHA {
+                result.eval = old_alpha;
+            }
+            break;
+        }
     }
+    result.nodes = sum;
     result.duration = start.elapsed();
     return result;
 }

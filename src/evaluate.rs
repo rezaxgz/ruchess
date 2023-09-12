@@ -2,10 +2,9 @@ use crate::board::Position;
 use crate::data::{
     calc_king_pst, get_adjacent_files, get_distance_from_center, get_fileset_bb, get_front_spans,
     get_orthogonal_distance, ADJACENT_FILESETS, DARK_SQUARES, FILES, KING_ATTACKS_BITBOARD,
-    KNIGHT_ATTACKS_BITBOARD, LIGHT_SQUARES, PAWN_SQUARE_TABLES, PIECE_SQUARE_TABLES, SECOND_RANK,
-    SEVENTH_RANK,
+    LIGHT_SQUARES, PAWN_SQUARE_TABLES, PIECE_SQUARE_TABLES, SECOND_RANK, SEVENTH_RANK,
 };
-use crate::moves::{get_bishop_moves, get_rook_moves};
+use crate::moves::{get_bishop_moves, get_knight_moves, get_rook_moves};
 use crate::transposition_table::TranspositionTable;
 use chess::Color;
 use chess::{
@@ -27,6 +26,10 @@ const OPEN_UNHEALTHY_PAWN_PENALTY: i16 = 10;
 const KING_SIDE_CASTLE_FILESET: u8 = ADJACENT_FILESETS[6];
 const QUEEN_SIDE_CASTLE_FILESET: u8 = ADJACENT_FILESETS[2];
 const PAWN_STORM_PENALTY: [i16; 8] = [0, 0, -60, -30, -10, 0, 0, 0];
+const BISHOP_MOBILITY_SCORE: i16 = 5;
+const KNIGHT_MOBILITY_SCORE: i16 = 4;
+const ROOK_MOBILITY_SCORE_ENDGAME: i16 = 4;
+const ROOK_MOBILITY_SCORE_MIDDLEGAME: i16 = 2;
 fn get_value<T>(m: T, e: T, endgame: f32) -> T {
     if endgame == 0.0 {
         return m;
@@ -142,12 +145,17 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable) -> i16 {
     } else {
         0
     };
+    let (white_mobility_score, white_attack_count, white_attack_value) =
+        evaluate_mobility(board, KING_ATTACKS_BITBOARD[bk], White, black_endgame);
+    let (black_mobility_score, black_attack_count, black_attack_value) =
+        evaluate_mobility(board, KING_ATTACKS_BITBOARD[wk], Black, white_endgame);
+
     let king_eval = if black_endgame != 0.0 && (board.pieces(Queen) & black_combined) != 0 {
-        evaluate_king_safety(wp, bp, wk, 0, board)
+        evaluate_king_safety(wp, bp, wk, 0, board, black_attack_count, black_attack_value)
     } else {
         0
     } - if white_endgame != 0.0 && (board.pieces(Queen) & white_combined) != 0 {
-        evaluate_king_safety(bp, wp, bk, 1, board)
+        evaluate_king_safety(bp, wp, bk, 1, board, white_attack_count, white_attack_value)
     } else {
         0
     };
@@ -157,7 +165,7 @@ pub fn evaluate(board: &Position, tt: &mut TranspositionTable) -> i16 {
         get_value(-20, -10, white_endgame)
     };
 
-    let eval = white_material - black_material
+    let eval = white_material - black_material + white_mobility_score - black_mobility_score
         + mop_eval
         + piece_scores
         + pawn_eval
@@ -365,6 +373,70 @@ fn evaluate_pawn_storm(their_pawns: u64, mut fileset: u8, color: usize) -> i16 {
     }
     return score;
 }
+fn evaluate_mobility(
+    board: &Position,
+    targets: u64,
+    color: Color,
+    endgame: f32,
+) -> (i16, u32, f32) {
+    let color_combined = board.color_combined(color).0;
+    let mut attacking_piece_count = 0;
+    let mut attacking_piece_values = 0.0;
+    let blockers = board.combined();
+
+    let mut score = 0;
+
+    let mut knights = board.pieces(Knight) & color_combined;
+    let mut knight_moves = 0;
+    while knights != 0 {
+        let moves = get_knight_moves(knights.trailing_zeros() as usize);
+        knight_moves += (moves & !blockers).count_ones() as i16;
+        if moves & targets != 0 {
+            attacking_piece_count += 1;
+            attacking_piece_values += 1.0;
+        }
+        knights &= knights - 1;
+    }
+    if knight_moves != 0 {
+        score += (knight_moves - 4) * KNIGHT_MOBILITY_SCORE;
+    }
+
+    let mut bishops = board.pieces(Bishop) & color_combined;
+    let mut bishop_moves = 0;
+    while bishops != 0 {
+        let moves = get_bishop_moves(bishops.trailing_zeros() as usize, blockers);
+        bishop_moves += (moves & !blockers).count_ones() as i16;
+        if moves & targets != 0 {
+            attacking_piece_count += 1;
+            attacking_piece_values += 1.0;
+        }
+        bishops &= bishops - 1;
+    }
+    if bishop_moves != 0 {
+        score += (bishop_moves - 6) * BISHOP_MOBILITY_SCORE;
+    }
+    let mut rooks = board.pieces(Rook) & color_combined;
+    let mut rook_moves = 0;
+    while rooks != 0 {
+        let moves = get_rook_moves(rooks.trailing_zeros() as usize, blockers);
+        rook_moves += (moves & !blockers).count_ones() as i16;
+        if moves & targets != 0 {
+            attacking_piece_count += 1;
+            attacking_piece_values += 2.0;
+        }
+        rooks &= rooks - 1;
+    }
+    if rook_moves != 0 {
+        score += (rook_moves - 7)
+            * get_value(
+                ROOK_MOBILITY_SCORE_MIDDLEGAME,
+                ROOK_MOBILITY_SCORE_ENDGAME,
+                endgame,
+            );
+    }
+
+    return (score, attacking_piece_count, attacking_piece_values);
+}
 fn get_piece_attack_weight(num: u32) -> f32 {
     match num {
         0 => 0.0,
@@ -381,41 +453,24 @@ fn get_piece_attack_weight(num: u32) -> f32 {
 fn evaluate_piece_attacks(
     board: &Position,
     targets: u64,
-    knight_attacks: u64,
+    mut count: u32,
+    mut values: f32,
     color: Color,
 ) -> i16 {
     let color_combined = board.color_combined(color).0;
-    let mut num = (board.pieces(Knight) & color_combined & knight_attacks).count_ones();
-    let mut values = num as f32;
     let blockers = board.combined();
-    let mut bishops = board.pieces(Bishop) & color_combined;
-    while bishops != 0 {
-        if get_bishop_moves(bishops.trailing_zeros() as usize, blockers) & targets != 0 {
-            num += 1;
-            values += 1.0;
-        }
-        bishops &= bishops - 1;
-    }
-    let mut rooks = board.pieces(Rook) & color_combined;
-    while rooks != 0 {
-        if get_rook_moves(rooks.trailing_zeros() as usize, blockers) & targets != 0 {
-            num += 1;
-            values += 2.0;
-        }
-        rooks &= rooks - 1;
-    }
     let mut queens = board.pieces(Queen) & color_combined;
     while queens != 0 {
         let q = queens.trailing_zeros() as usize;
         if (get_rook_moves(q, blockers) & targets != 0)
             || (get_bishop_moves(q, blockers) & targets != 0)
         {
-            num += 1;
+            count += 1;
             values += 4.0;
         }
         queens &= queens - 1;
     }
-    return (20.0 * values * get_piece_attack_weight(num)) as i16;
+    return (20.0 * values * get_piece_attack_weight(count)) as i16;
 }
 fn evaluate_king_safety(
     my_pawns: u64,
@@ -423,6 +478,8 @@ fn evaluate_king_safety(
     king: usize,
     color: usize,
     board: &Position,
+    attacking_pieces_count: u32,
+    attacking_pieces_value: f32,
 ) -> i16 {
     let castling_rights = board.castle_rights(if color == 0 { White } else { Black });
     let mut storm_value = evaluate_pawn_storm(their_pawns, ADJACENT_FILESETS[king & 7], color);
@@ -443,7 +500,8 @@ fn evaluate_king_safety(
         - evaluate_piece_attacks(
             board,
             KING_ATTACKS_BITBOARD[king],
-            KNIGHT_ATTACKS_BITBOARD[king],
+            attacking_pieces_count,
+            attacking_pieces_value,
             if color == 0 { Black } else { White },
         );
 }
